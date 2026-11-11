@@ -7,14 +7,14 @@ using namespace geode::prelude;
 class $modify(MutePlayLayer, PlayLayer) {
     struct Fields {
         bool muted = false;
-        TaskHolder<web::WebResponse> listener;
+        EventListener<web::WebTask> listener;
     };
 
     void sendState(bool mute) {
         auto req = web::WebRequest();
-        m_fields->listener.spawn(
-            req.post(mute ? "http://127.0.0.1:8765/mute" : "http://127.0.0.1:8765/unmute"),
-            [](web::WebResponse) {}
+        m_fields->listener.bind([](web::WebTask::Event* e) {});
+        m_fields->listener.setFilter(
+            req.post(mute ? "http://127.0.0.1:8765/mute" : "http://127.0.0.1:8765/unmute")
         );
     }
 
