@@ -1,0 +1,47 @@
+name: Build and Release
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  mod:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: geode-sdk/build-geode-mod@main
+        id: build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mod
+          path: ${{ steps.build.outputs.build-output }}
+
+  app:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+      - run: pip install pycaw pyinstaller
+      - run: pyinstaller --onefile app/gdmute.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app
+          path: dist/gdmute.exe
+
+  release:
+    needs: [mod, app]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: out
+      - run: cd out && zip ../gd-mute-mod.zip *.geode
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            gd-mute-mod.zip
+            out/gdmute.exe

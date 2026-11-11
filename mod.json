@@ -1,0 +1,21 @@
+{
+	"geode": "4.0.0",
+	"gd": {
+		"win": "*"
+	},
+	"id": "kodymcmonagle.gdquiet",
+	"name": "GD Quiet",
+	"version": "v1.0.0",
+	"developer": "kodymcmonagle",
+	"description": "Mutes background apps past a chosen percent of a level.",
+	"settings": {
+		"mute-at-percent": {
+			"type": "float",
+			"name": "Mute at percent",
+			"description": "Percent of the level at which other apps will be muted",
+			"default": 50.0,
+			"min": 0.0,
+			"max": 100.0
+		}
+	}
+}
