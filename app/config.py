@@ -55,6 +55,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "deafen_hotkey": None,
     "mute_at_percent": 50.0,
     "show_background_audio": False,
+    "watch_enabled": True,
+    "watch_mode": "auto_window",
+    "target_process": "geometrydash.exe",
+    "custom_region": None,
+    "unmute_at_100": True,
 }
 
 

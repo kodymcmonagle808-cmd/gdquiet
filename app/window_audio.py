@@ -157,6 +157,17 @@ def _enum_open_windows_by_process() -> dict[str, list[str]]:
     return windows_by_proc
 
 
+def list_open_window_processes() -> list[tuple[str, str]]:
+    """Return sorted [(process_name, sample_title)] for visible non-system windows."""
+    windows_by_proc = _enum_open_windows_by_process()
+    items = [
+        (proc_name, f"{_friendly_name(proc_name)} — {titles[0][:45]}")
+        for proc_name, titles in windows_by_proc.items()
+        if titles
+    ]
+    return sorted(items, key=lambda x: x[1].lower())
+
+
 def list_mute_targets(include_background_audio: bool = False) -> list[MuteTarget]:
     windows_by_proc = _enum_open_windows_by_process()
     targets: dict[str, MuteTarget] = {}

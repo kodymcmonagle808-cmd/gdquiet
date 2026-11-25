@@ -5,24 +5,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  mod:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: geode-sdk/build-geode-mod@main
-        id: build
-        with:
-          sdk: 'v4.10.2'
-          bindings-ref: '5129d7d6dc7a1b7d6770a8a422e1b5266bed704e'
-          configure-args: '-DSKIP_BUILDING_CODEGEN=OFF'
-        env:
-          GDQUIET_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          GDQUIET_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY || secrets.SUPABASE_ANON_KEY }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mod
-          path: ${{ steps.build.outputs.build-output }}
-
   app:
     runs-on: windows-latest
     steps:
@@ -36,14 +18,15 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY || secrets.SUPABASE_ANON_KEY }}
         run: python -c "import json, os; u = os.environ.get('SUPABASE_URL', '').strip().rstrip('/'); k = os.environ.get('SUPABASE_ANON_KEY', '').strip(); open('app/build_config.py', 'w', encoding='utf-8').write(f'SUPABASE_URL = {json.dumps(u)}\nSUPABASE_ANON_KEY = {json.dumps(k)}\n')"
-      - run: pyinstaller --onefile --noconsole --name GDQuiet --paths app app/gdquiet.py
+      - run: python -m unittest discover -s tests -v
+      - run: pyinstaller --onefile --noconsole --name GDQuiet --paths app --collect-submodules winrt --collect-binaries winrt --collect-data winrt --hidden-import=PIL._tkinter_finder app/gdquiet.py
       - uses: actions/upload-artifact@v4
         with:
           name: app
           path: dist/GDQuiet.exe
 
   release:
-    needs: [mod, app]
+    needs: [app]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -52,9 +35,8 @@ jobs:
         with:
           merge-multiple: true
           path: out
-      - name: Upload direct .geode and GDQuiet.exe assets
+      - name: Upload GDQuiet.exe asset
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            out/*.geode
             out/GDQuiet.exe

@@ -123,6 +123,29 @@ class SupabaseClient:
             payload={"p_mute_at_percent": float(percent)},
         )
 
+    def report_own_state(
+        self,
+        access_token: str,
+        user_id: str,
+        percent: float,
+        is_playing: bool,
+        should_mute: bool,
+    ) -> None:
+        encoded_uid = urllib.parse.quote(user_id, safe="")
+        headers = self._headers(access_token)
+        headers["Prefer"] = "return=minimal"
+        _request_json(
+            f"{self.url}/rest/v1/gdquiet_accounts?user_id=eq.{encoded_uid}",
+            method="PATCH",
+            headers=headers,
+            payload={
+                "current_percent": round(max(0.0, min(100.0, float(percent))), 2),
+                "is_playing": bool(is_playing),
+                "should_mute": bool(should_mute),
+            },
+            timeout=5.0,
+        )
+
     def poll_account_state(self, access_token: str, user_id: str) -> dict[str, Any] | None:
         encoded_uid = urllib.parse.quote(user_id, safe="")
         rows = _request_json(

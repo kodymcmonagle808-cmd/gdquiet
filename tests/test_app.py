@@ -7,11 +7,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from PIL import Image, ImageDraw, ImageFont
+
 APP_DIR = Path(__file__).resolve().parent.parent / "app"
 sys.path.insert(0, str(APP_DIR))
 
 import config  # noqa: E402
 import discord_hotkey  # noqa: E402
+import screen_reader  # noqa: E402
 import supabase_client  # noqa: E402
 import window_audio  # noqa: E402
 
@@ -113,6 +116,73 @@ class GDQuietTests(unittest.TestCase):
         self.assertIsInstance(targets, list)
         for t in targets:
             self.assertNotEqual(t.process_name, "geometrydash.exe")
+
+    def test_parse_percent_variants(self) -> None:
+        self.assertEqual(screen_reader.parse_percent_from_text("50%"), 50.0)
+        self.assertEqual(screen_reader.parse_percent_from_text("50.24%"), 50.24)
+        self.assertEqual(screen_reader.parse_percent_from_text("490/0"), 49.0)
+        self.assertEqual(screen_reader.parse_percent_from_text("1000/0"), 100.0)
+        self.assertEqual(screen_reader.parse_percent_from_text("542%"), 54.2)
+        self.assertIsNone(screen_reader.parse_percent_from_text("Attempt 42"))
+
+    def test_winrt_ocr_reads_rendered_hud_percentages(self) -> None:
+        ocr = screen_reader.WinRtPercentOcr()
+        self.assertTrue(ocr.available())
+        try:
+            font = ImageFont.truetype("C:/Windows/Fonts/arialbd.ttf", 28)
+            for label, expected in [("8%", 8.0), ("49%", 49.0), ("50.24%", 50.24), ("100%", 100.0)]:
+                bg = Image.new("RGBA", (280, 75), (40, 140, 220, 255))
+                d = ImageDraw.Draw(bg)
+                d.rectangle([20, 10, 250, 65], fill=(20, 200, 90, 255))
+                d.text(
+                    (85, 16),
+                    label,
+                    font=font,
+                    fill=(255, 255, 255, 255),
+                    stroke_width=2,
+                    stroke_fill=(0, 0, 0, 255),
+                )
+                pct, _raw = ocr.read_percent(bg)
+                self.assertEqual(pct, expected)
+        finally:
+            ocr.close()
+
+    def test_percent_debouncer_transitions(self) -> None:
+        deb = screen_reader.PercentStateDebouncer(missing_timeout_s=0.6)
+        # Smooth ramp across threshold mutes immediately
+        self.assertEqual(deb.update(45.0, 50.0, True, now=1.0), (False, True))
+        self.assertEqual(deb.update(50.2, 50.0, True, now=1.1), (True, True))
+        # Dropping below threshold unmutes immediately
+        self.assertEqual(deb.update(0.0, 50.0, True, now=1.2), (False, True))
+        # Sudden jump from 0 -> 88 requires 2 consecutive frames to ignore 1-frame OCR glitch
+        self.assertEqual(deb.update(88.0, 50.0, True, now=1.3), (False, True))
+        self.assertEqual(deb.update(12.0, 50.0, True, now=1.4), (False, True))
+        # Two consecutive high frames mute
+        self.assertEqual(deb.update(60.0, 50.0, True, now=1.5), (False, True))
+        self.assertEqual(deb.update(61.0, 50.0, True, now=1.6), (True, True))
+        # Reaching 100% unmutes if enabled
+        self.assertEqual(deb.update(100.0, 50.0, True, now=1.7), (False, True))
+        # Missing percent past timeout unmutes
+        self.assertEqual(deb.update(62.0, 50.0, True, now=2.0), (False, True))
+        self.assertEqual(deb.update(63.0, 50.0, True, now=2.1), (True, True))
+        self.assertEqual(deb.update(None, 50.0, True, now=2.2), (True, True))
+        self.assertEqual(deb.update(None, 50.0, True, now=2.8), (False, False))
+
+    def test_screen_test_session_records_milestones_and_finishes(self) -> None:
+        sess = screen_reader.ScreenTestSession(duration_s=30.0)
+        sess.start(now=100.0)
+        self.assertTrue(sess.active)
+        self.assertFalse(sess.record(0.0, now=101.0))
+        self.assertFalse(sess.record(12.5, now=105.0))
+        self.assertFalse(sess.record(12.8, now=105.2))
+        self.assertFalse(sess.record(48.2, now=115.0))
+        self.assertTrue(sess.record(50.0, now=130.5))
+        self.assertFalse(sess.active)
+        self.assertTrue(sess.completed)
+        passed, headline, _detail = sess.summary()
+        self.assertTrue(passed)
+        self.assertIn("48.20%", headline)
+        self.assertGreaterEqual(len(sess.milestones), 3)
 
 
 if __name__ == "__main__":

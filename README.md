@@ -1,43 +1,28 @@
 # GD Quiet
 
-Automatically mute **only the open windows you select** in `GDQuiet.exe` and optionally **auto-deafen Discord** once your Geometry Dash level progress passes your chosen percentage — then unmute and undeafen immediately when you die, restart, beat the level, exit, or close GD.
+Standalone Windows app (`GDQuiet.exe`) that reads your level percentage directly from Geometry Dash's window or screen (no Geode mod required), mutes **only the open windows you select**, and optionally **auto-deafens Discord** using your Discord Toggle Deafen hotkey.
 
-## How It Works
+## Features
 
-1. **`GDQuiet.exe`** (Windows desktop menu):
-   - Sign in with **Discord through Supabase** to generate your 8-digit **GD Quiet Account Number**.
-   - Check the specific open windows/apps you want muted.
-   - Set your **Mute at %** threshold.
-   - *(Optional)* Enable **Auto-Deafen Discord** and record your Discord **Toggle Deafen** hotkey.
-2. **Geode Mod (`kodymcmonagle.gdquiet`)**:
-   - Reads your live level percentage inside Geometry Dash.
-   - Paste your **Account Number** from `GDQuiet.exe` into the mod settings in Geode — that's it.
+- **No Geode Mod Needed:** Reads the percentage text directly from `GeometryDash.exe` (auto top-center crop, or drag your own box with **Pick Screen Region**).
+- **Per-Window Mute Menu:** Pick exactly which open windows or audio apps get muted past your chosen percent, leaving manually muted apps untouched.
+- **Discord Auto-Deafen:** Record your Discord **Toggle Deafen** hotkey so Discord automatically deafens above your threshold and undeafens on death, exit, or 100%.
+- **Discord Login via Supabase:** Sign in with Discord inside `GDQuiet.exe` to generate your GD Quiet Account Number and save your threshold/live status.
+
+## Usage
+
+1. Download and run **`GDQuiet.exe`** from the Releases page.
+2. In Geometry Dash **Graphics** settings, use **Windowed** or **Borderless** mode and make sure **Show Percentage** is enabled.
+3. In `GDQuiet.exe`:
+   - Check the open windows/apps you want muted.
+   - Set **Mute at %** (default `50%`).
+   - *(Optional)* Click **Pick Screen Region** if your percentage is placed somewhere other than the top-center of GD.
+   - *(Optional)* Enable **Auto-Deafen Discord** and record your Discord Toggle Deafen keybind.
+   - *(Optional)* Click **Sign in with Discord** to link your GD Quiet account via Supabase.
 
 ## Setup (Supabase, Discord & GitHub Secrets)
 
-### 1. Create the Supabase Project & Table
-1. Create a project at [supabase.com](https://supabase.com).
-2. Open **SQL Editor** and run [`supabase/schema.sql`](supabase/schema.sql).
-3. In **Authentication → URL Configuration → Redirect URLs**, add:
-   - `http://127.0.0.1:54321/callback`
-   - `http://127.0.0.1:*/callback`
-
-### 2. Enable Discord Sign-In in Supabase
-1. Create an app in the [Discord Developer Portal](https://discord.com/developers/applications).
-2. Copy your **Client ID** and **Client Secret** into **Supabase → Authentication → Providers → Discord**.
-3. Copy the **Callback URL** shown by Supabase (`https://<your-project>.supabase.co/auth/v1/callback`) into **Discord Developer Portal → OAuth2 → Redirects**.
-
-### 3. Add GitHub Repository Secrets
-In your GitHub repo **Settings → Secrets and variables → Actions**, add:
-- `SUPABASE_URL` — `https://<your-project>.supabase.co`
-- `SUPABASE_ANON_KEY` — your project's Supabase `anon` / publishable key
-
-Trigger the **Build and Release** workflow (or push a tag like `v2.0.0`) to build both `kodymcmonagle.gdquiet.geode` and `GDQuiet.exe` with your project config baked in.
-
-## Submitting the `.geode` File to the Geode Index
-
-1. Publish a GitHub Release containing the raw **`kodymcmonagle.gdquiet.geode`** file (not zipped).
-2. Submit the direct download URL (`https://github.com/kodymcmonagle808-cmd/gdquiet/releases/download/v2.0.0/kodymcmonagle.gdquiet.geode`) either:
-   - On [geode-sdk.org](https://geode-sdk.org) (log in with GitHub → profile → **Submit a new mod**), or
-   - Via CLI: `geode index login` then `geode index mods create`.
-3. Wait for a Geode Index moderator to review and approve your mod.
+1. Run [`supabase/schema.sql`](supabase/schema.sql) in the Supabase **SQL Editor**.
+2. In Supabase **Authentication → URL Configuration → Redirect URLs**, add `http://127.0.0.1:54321/callback` and `http://127.0.0.1:*/callback`.
+3. Enable **Discord** in Supabase **Authentication → Sign In / Providers**, and add Supabase's callback URL to your Discord Developer Portal app under **OAuth2 → Redirects**.
+4. Set `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` (or `SUPABASE_ANON_KEY`) in GitHub **Settings → Secrets and variables → Actions** before releasing.
