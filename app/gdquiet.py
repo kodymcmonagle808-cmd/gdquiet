@@ -915,7 +915,7 @@ class GDQuietApp:
 
         tk.Label(
             deaf_card,
-            text="Set a keybind here and match it to Discord → Keybinds → Toggle Deafen (auto-undeafens on death, 100%, or exit).",
+            text="Set a keybind here and match it to Discord → System → Keybinds → Toggle Deafen (auto-undeafens on death, 100%, or exit).",
             bg=COLORS["card"],
             fg=COLORS["subtext"],
             font=("Segoe UI", 9),
@@ -1004,7 +1004,7 @@ class GDQuietApp:
             (
                 "1",
                 "Open Discord Keybinds",
-                "In Discord, click the Gear icon (User Settings) at the bottom-left, then open App Settings → Keybinds.",
+                "In Discord, click the cog in the bottom-left, scroll down under Experience, click System, and the Keybinds menu is there.",
                 None,
             ),
             (
