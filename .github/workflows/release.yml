@@ -13,11 +13,6 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r app/requirements.txt
-      - name: Bake Supabase config from repository secrets
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY || secrets.SUPABASE_ANON_KEY }}
-        run: python -c "import json, os; u = os.environ.get('SUPABASE_URL', '').strip().rstrip('/'); k = os.environ.get('SUPABASE_ANON_KEY', '').strip(); open('app/build_config.py', 'w', encoding='utf-8').write(f'SUPABASE_URL = {json.dumps(u)}\nSUPABASE_ANON_KEY = {json.dumps(k)}\n')"
       - run: python -m unittest discover -s tests -v
       - run: pyinstaller --onefile --noconsole --name GDQuiet --paths app --collect-submodules winrt --collect-binaries winrt --collect-data winrt --hidden-import=PIL._tkinter_finder app/gdquiet.py
       - uses: actions/upload-artifact@v4

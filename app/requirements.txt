@@ -1,6 +1,5 @@
 pycaw
 psutil
-websockets
 mss
 pillow
 winrt-Windows.Media.Ocr

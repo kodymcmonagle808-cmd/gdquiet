@@ -15,7 +15,6 @@ sys.path.insert(0, str(APP_DIR))
 import config  # noqa: E402
 import discord_hotkey  # noqa: E402
 import screen_reader  # noqa: E402
-import supabase_client  # noqa: E402
 import window_audio  # noqa: E402
 
 
@@ -85,31 +84,10 @@ class GDQuietTests(unittest.TestCase):
             self.assertEqual(chrome.SimpleAudioVolume.muted, 1)
             self.assertEqual(discord.SimpleAudioVolume.muted, 0)
 
-    def test_pkce_pair(self) -> None:
-        verifier, challenge = supabase_client._pkce_pair()
-        self.assertGreaterEqual(len(verifier), 43)
-        self.assertNotEqual(verifier, challenge)
-        self.assertNotIn("=", challenge)
-
-    def test_supabase_headers_support_publishable_and_jwt_keys(self) -> None:
-        pub_client = supabase_client.SupabaseClient("https://x.supabase.co", "sb_publishable_abc123")
-        self.assertNotIn("Authorization", pub_client._headers())
-        self.assertEqual(pub_client._headers("user-jwt")["Authorization"], "Bearer user-jwt")
-
-        jwt_client = supabase_client.SupabaseClient("https://x.supabase.co", "eyJ_legacy_anon")
-        self.assertEqual(jwt_client._headers()["Authorization"], "Bearer eyJ_legacy_anon")
-
-    def test_resolve_supabase_credentials_precedence(self) -> None:
-        with patch.dict("os.environ", {"SUPABASE_URL": "https://env.supabase.co/", "SUPABASE_ANON_KEY": "env-key"}):
-            url, key = config.resolve_supabase_credentials({"supabase_url": "", "supabase_anon_key": ""})
-            self.assertEqual(url, "https://env.supabase.co")
-            self.assertEqual(key, "env-key")
-
-            url2, key2 = config.resolve_supabase_credentials(
-                {"supabase_url": "https://cfg.supabase.co/", "supabase_anon_key": "cfg-key"}
-            )
-            self.assertEqual(url2, "https://cfg.supabase.co")
-            self.assertEqual(key2, "cfg-key")
+    def test_default_config_excludes_supabase_keys(self) -> None:
+        self.assertNotIn("supabase_url", config.DEFAULT_CONFIG)
+        self.assertNotIn("supabase_anon_key", config.DEFAULT_CONFIG)
+        self.assertNotIn("session", config.DEFAULT_CONFIG)
 
     def test_live_window_enumeration_runs(self) -> None:
         targets = window_audio.list_mute_targets(include_background_audio=True)
@@ -233,6 +211,10 @@ class GDQuietTests(unittest.TestCase):
                 self.assertTrue(app.test_session.completed)
 
                 # Exercise page tabs & watcher toggle
+                self.assertEqual(app._nav_buttons["discord"][2].cget("text"), "Discord Auto-Deafen")
+                self.assertFalse(hasattr(app, "supabase"))
+                self.assertFalse(hasattr(app, "login_btn"))
+                self.assertTrue(hasattr(app, "record_hk_btn"))
                 for page_key in ("apps", "discord", "capture", "dashboard"):
                     app._show_page(page_key)
                 app._toggle_watching()

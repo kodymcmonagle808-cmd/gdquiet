@@ -12,7 +12,7 @@ from typing import Any
 import mss
 from PIL import Image, ImageEnhance, ImageTk
 
-from config import load_config, resolve_supabase_credentials, save_config
+from config import load_config, save_config
 from discord_hotkey import DiscordDeafenController, parse_tk_hotkey, send_hotkey
 from screen_reader import (
     ScreenPercentWatcher,
@@ -21,7 +21,6 @@ from screen_reader import (
     find_window_client_rect,
     get_virtual_screen_bounds,
 )
-from supabase_client import SupabaseClient
 from window_audio import (
     AudioMuteController,
     MuteTarget,
@@ -156,8 +155,6 @@ class GDQuietApp:
 
         self.cfg_lock = threading.RLock()
         self.cfg = load_config()
-        url, anon_key = resolve_supabase_credentials(self.cfg)
-        self.supabase = SupabaseClient(url, anon_key)
 
         self.audio_ctrl = AudioMuteController()
         self.discord_ctrl = DiscordDeafenController()
@@ -166,7 +163,6 @@ class GDQuietApp:
         self.test_lock = threading.RLock()
         self.test_session = ScreenTestSession(duration_s=30.0)
 
-        self.account: dict[str, Any] | None = None
         self.current_want_mute = False
         self.recording_hotkey = False
         self.window_vars: dict[str, tk.BooleanVar] = {}
@@ -174,8 +170,6 @@ class GDQuietApp:
         self._latest_reading: ScreenReading | None = None
         self._ui_reading_pending = False
         self._preview_photo_main: ImageTk.PhotoImage | None = None
-        self._last_cloud_sync_at = 0.0
-        self._last_cloud_mute: bool | None = None
         self._active_page = "dashboard"
         self._nav_buttons: dict[str, tuple[tk.Frame, tk.Frame, tk.Button]] = {}
         self._pages: dict[str, tk.Frame] = {}
@@ -185,7 +179,6 @@ class GDQuietApp:
         self._show_page("dashboard")
         self._refresh_windows()
         self._refresh_target_windows()
-        self._restore_session_async()
 
         self.watcher = ScreenPercentWatcher(
             get_settings=self._snapshot_cfg,
@@ -362,7 +355,7 @@ class GDQuietApp:
         nav_items = [
             ("dashboard", "Overview & 30s Test"),
             ("apps", "Apps to Mute"),
-            ("discord", "Discord & Account"),
+            ("discord", "Discord Auto-Deafen"),
             ("capture", "Screen Capture"),
         ]
         for key, label in nav_items:
@@ -799,33 +792,33 @@ class GDQuietApp:
 
         tk.Label(
             page,
-            text="Discord & Account",
+            text="Discord Auto-Deafen",
             bg=COLORS["bg"],
             fg=COLORS["text"],
             font=("Segoe UI", 17, "bold"),
         ).pack(anchor="w")
         tk.Label(
             page,
-            text="Auto-deafen Discord past your percentage and link your GD Quiet account.",
+            text="Automatically press your Discord Toggle Deafen keybind past your % and undeafen when you die or exit.",
             bg=COLORS["bg"],
             fg=COLORS["subtext"],
             font=("Segoe UI", 9),
         ).pack(anchor="w", pady=(2, 14))
 
-        # Card A: Auto-Deafen Hotkey
+        # Auto-Deafen Hotkey Card
         deaf_card = self._make_card(page)
-        deaf_card.pack(fill="x", pady=(0, 14))
+        deaf_card.pack(fill="x")
 
         tk.Label(
             deaf_card,
-            text="Discord Auto-Deafen",
+            text="Toggle Deafen Hotkey",
             bg=COLORS["card"],
             fg=COLORS["text"],
             font=("Segoe UI", 12, "bold"),
         ).pack(anchor="w")
         tk.Label(
             deaf_card,
-            text="Automatically presses your Discord Toggle Deafen keybind when you cross your % and undeafens when you die or exit.",
+            text="Set a keybind here and match it in Discord so GD Quiet can deafen and undeafen automatically.",
             bg=COLORS["card"],
             fg=COLORS["subtext"],
             font=("Segoe UI", 9),
@@ -883,83 +876,6 @@ class GDQuietApp:
             fg=COLORS["subtext"],
             font=("Segoe UI", 8),
         ).pack(anchor="w", pady=(10, 0))
-
-        # Card B: Supabase Discord Account
-        acc_card = self._make_card(page)
-        acc_card.pack(fill="x")
-
-        acc_top = tk.Frame(acc_card, bg=COLORS["card"])
-        acc_top.pack(fill="x")
-        tk.Label(
-            acc_top,
-            text="GD Quiet Account (Discord via Supabase)",
-            bg=COLORS["card"],
-            fg=COLORS["text"],
-            font=("Segoe UI", 12, "bold"),
-        ).pack(side="left")
-
-        btn_box = tk.Frame(acc_top, bg=COLORS["card"])
-        btn_box.pack(side="right")
-
-        self._make_button(btn_box, "Supabase Settings", self._open_settings_dialog, padx=10, pady=5).pack(
-            side="right", padx=(8, 0)
-        )
-        self.login_btn = self._make_button(
-            btn_box,
-            "Sign in with Discord",
-            self._start_discord_login,
-            bg=COLORS["accent"],
-            hover_bg=COLORS["accent_hover"],
-            pady=5,
-        )
-        self.logout_btn = self._make_button(btn_box, "Sign Out", self._sign_out, pady=5)
-
-        self.account_details = tk.Frame(acc_card, bg=COLORS["card"])
-        info_row = tk.Frame(self.account_details, bg=COLORS["card"])
-        info_row.pack(fill="x", pady=(12, 0))
-
-        self.discord_user_label = tk.Label(
-            info_row,
-            text="Signed in as —",
-            bg=COLORS["card"],
-            fg=COLORS["text"],
-            font=("Segoe UI", 10, "bold"),
-        )
-        self.discord_user_label.pack(side="left")
-
-        id_badge = tk.Frame(info_row, bg=COLORS["input"], padx=10, pady=5)
-        id_badge.pack(side="right")
-        tk.Label(id_badge, text="Account #:", bg=COLORS["input"], fg=COLORS["subtext"], font=("Segoe UI", 8)).pack(
-            side="left", padx=(0, 6)
-        )
-        self.account_num_var = tk.StringVar(value="--------")
-        tk.Label(
-            id_badge,
-            textvariable=self.account_num_var,
-            bg=COLORS["input"],
-            fg=COLORS["cyan"],
-            font=("Consolas", 12, "bold"),
-        ).pack(side="left", padx=(0, 8))
-        self.copy_btn = self._make_button(
-            id_badge,
-            "Copy",
-            self._copy_account_number,
-            bg=COLORS["accent"],
-            hover_bg=COLORS["accent_hover"],
-            padx=10,
-            pady=3,
-        )
-        self.copy_btn.pack(side="left")
-
-        self.signed_out_hint = tk.Label(
-            acc_card,
-            text="Sign in with Discord through Supabase to save your threshold and GD Quiet account number in the cloud.",
-            bg=COLORS["card"],
-            fg=COLORS["subtext"],
-            font=("Segoe UI", 9),
-            wraplength=600,
-            justify="left",
-        )
 
     def _build_capture_page(self) -> None:
         page = tk.Frame(self.main_area, bg=COLORS["bg"])
@@ -1359,9 +1275,6 @@ class GDQuietApp:
         if effective_mute != self.current_want_mute:
             self._apply_mute_state(effective_mute)
 
-        if not testing:
-            self._maybe_sync_cloud_state(reading)
-
         with self.reading_lock:
             self._latest_reading = reading
             if not self._ui_reading_pending:
@@ -1403,41 +1316,6 @@ class GDQuietApp:
                 width=thumb.width,
                 height=thumb.height,
             )
-
-    def _maybe_sync_cloud_state(self, reading: ScreenReading) -> None:
-        session = self.cfg.get("session")
-        if not session or not self.supabase.is_configured() or not session.get("user_id"):
-            return
-
-        now = time.monotonic()
-        flipped = self._last_cloud_mute != reading.should_mute
-        if not flipped and (now - self._last_cloud_sync_at) < 2.0:
-            return
-        if not flipped and not reading.is_playing:
-            return
-
-        self._last_cloud_sync_at = now
-        self._last_cloud_mute = reading.should_mute
-
-        def worker() -> None:
-            try:
-                cur = dict(session)
-                if time.time() >= float(cur.get("expires_at") or 0.0) and cur.get("refresh_token"):
-                    cur = self.supabase.refresh_session(cur["refresh_token"])
-                    with self.cfg_lock:
-                        self.cfg["session"] = cur
-                    self._save_cfg()
-                self.supabase.report_own_state(
-                    access_token=cur["access_token"],
-                    user_id=cur["user_id"],
-                    percent=reading.percent or 0.0,
-                    is_playing=reading.is_playing,
-                    should_mute=reading.should_mute,
-                )
-            except Exception:
-                pass
-
-        threading.Thread(target=worker, daemon=True).start()
 
     def _update_status_indicators(self) -> None:
         with self.test_lock:
@@ -1498,30 +1376,6 @@ class GDQuietApp:
             self.cfg["mute_at_percent"] = pct
         self._save_cfg()
         self._update_sidebar_badges()
-
-        session = self.cfg.get("session")
-        if not session or not self.supabase.is_configured():
-            return
-
-        self.save_pct_btn.configure(state="disabled", text="Saving...")
-
-        def worker() -> None:
-            try:
-                acct = self.supabase.update_mute_percent(session["access_token"], pct)
-                self.root.after(0, lambda: self._on_percent_saved(acct))
-            except Exception as exc:
-                self.root.after(0, lambda err=str(exc): self._on_percent_save_error(err))
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _on_percent_saved(self, account: dict[str, Any]) -> None:
-        self.save_pct_btn.configure(state="normal", text="Apply %")
-        self.account = account
-        self.footer_error.configure(text="")
-
-    def _on_percent_save_error(self, err: str) -> None:
-        self.save_pct_btn.configure(state="normal", text="Apply %")
-        self.footer_error.configure(text=f"Saved locally (cloud sync skipped: {err})")
 
     def _apply_mute_state(self, want_mute: bool) -> None:
         def worker() -> None:
@@ -1696,7 +1550,7 @@ class GDQuietApp:
             for widget in (row, text_col, top_line, name_lbl, proc_lbl, sub_lbl, badge_lbl):
                 widget.bind("<Button-1>", toggle_row)
 
-    # ---- Discord & Supabase Account Page ----
+    # ---- Discord Auto-Deafen Page ----
 
     def _on_toggle_auto_deafen(self) -> None:
         enabled = bool(self.auto_deafen_var.get())
@@ -1759,167 +1613,6 @@ class GDQuietApp:
         self.hotkey_var.set("Not set")
         self._update_sidebar_badges()
 
-    def _render_auth_state(self) -> None:
-        self.account_details.pack_forget()
-        self.signed_out_hint.pack_forget()
-        self.login_btn.pack_forget()
-        self.logout_btn.pack_forget()
-
-        if self.account:
-            self.logout_btn.pack(side="right")
-            name = self.account.get("discord_username") or "Discord User"
-            self.discord_user_label.configure(text=f"Signed in as {name}")
-            self.account_num_var.set(str(self.account.get("account_number") or "--------"))
-            self.account_details.pack(fill="x")
-        else:
-            self.login_btn.pack(side="right")
-            self.signed_out_hint.pack(anchor="w", pady=(10, 0))
-
-    def _copy_account_number(self) -> None:
-        code = self.account_num_var.get().strip()
-        if not code or code == "--------":
-            return
-        self.root.clipboard_clear()
-        self.root.clipboard_append(code)
-        self.copy_btn.configure(text="Copied!")
-        self.root.after(1500, lambda: self.copy_btn.configure(text="Copy"))
-
-    def _open_settings_dialog(self) -> None:
-        dlg = tk.Toplevel(self.root)
-        dlg.title("Supabase Configuration")
-        dlg.geometry("500x250")
-        dlg.configure(bg=COLORS["bg"])
-        dlg.transient(self.root)
-        dlg.grab_set()
-
-        frame = tk.Frame(dlg, bg=COLORS["bg"], padx=18, pady=16)
-        frame.pack(fill="both", expand=True)
-
-        tk.Label(
-            frame,
-            text="Local override (optional if already baked from GitHub repo secrets):",
-            bg=COLORS["bg"],
-            fg=COLORS["subtext"],
-            font=("Segoe UI", 9),
-        ).pack(anchor="w", pady=(0, 10))
-
-        cur_url, cur_key = resolve_supabase_credentials(self.cfg)
-
-        tk.Label(frame, text="Supabase Project URL", bg=COLORS["bg"], fg=COLORS["text"], font=("Segoe UI", 9, "bold")).pack(
-            anchor="w"
-        )
-        url_var = tk.StringVar(value=self.cfg.get("supabase_url") or cur_url)
-        tk.Entry(
-            frame,
-            textvariable=url_var,
-            bg=COLORS["input"],
-            fg=COLORS["text"],
-            insertbackground=COLORS["text"],
-            relief="flat",
-            font=("Consolas", 9),
-        ).pack(fill="x", pady=(4, 10), ipady=5)
-
-        tk.Label(
-            frame,
-            text="Supabase Publishable / Anon Key",
-            bg=COLORS["bg"],
-            fg=COLORS["text"],
-            font=("Segoe UI", 9, "bold"),
-        ).pack(anchor="w")
-        key_var = tk.StringVar(value=self.cfg.get("supabase_anon_key") or cur_key)
-        tk.Entry(
-            frame,
-            textvariable=key_var,
-            bg=COLORS["input"],
-            fg=COLORS["text"],
-            insertbackground=COLORS["text"],
-            relief="flat",
-            font=("Consolas", 9),
-        ).pack(fill="x", pady=(4, 14), ipady=5)
-
-        def save_and_close() -> None:
-            with self.cfg_lock:
-                self.cfg["supabase_url"] = url_var.get().strip().rstrip("/")
-                self.cfg["supabase_anon_key"] = key_var.get().strip()
-            self._save_cfg()
-            new_url, new_key = resolve_supabase_credentials(self.cfg)
-            self.supabase = SupabaseClient(new_url, new_key)
-            dlg.destroy()
-            self._render_auth_state()
-            if self.cfg.get("session"):
-                self._restore_session_async()
-
-        btns = tk.Frame(frame, bg=COLORS["bg"])
-        btns.pack(fill="x")
-        self._make_button(btns, "Save", save_and_close, bg=COLORS["accent"], hover_bg=COLORS["accent_hover"]).pack(
-            side="right"
-        )
-        self._make_button(btns, "Cancel", dlg.destroy).pack(side="right", padx=(0, 8))
-
-    def _restore_session_async(self) -> None:
-        session = self.cfg.get("session")
-        if not session or not self.supabase.is_configured():
-            return
-
-        def worker() -> None:
-            try:
-                cur = dict(session)
-                if cur.get("refresh_token"):
-                    cur = self.supabase.refresh_session(cur["refresh_token"])
-                acct = self.supabase.get_or_create_account(cur["access_token"])
-                self.root.after(0, lambda: self._on_signed_in(cur, acct))
-            except Exception:
-                pass
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _start_discord_login(self) -> None:
-        if not self.supabase.is_configured():
-            messagebox.showinfo(
-                "Supabase Not Configured",
-                "Enter your Supabase Project URL and Publishable/Anon Key in 'Supabase Settings' first.",
-            )
-            return
-
-        self.login_btn.configure(state="disabled", text="Waiting for browser...")
-        self.footer_error.configure(text="")
-
-        def worker() -> None:
-            try:
-                session = self.supabase.sign_in_with_discord()
-                acct = self.supabase.get_or_create_account(session["access_token"])
-                self.root.after(0, lambda: self._on_signed_in(session, acct))
-            except Exception as exc:
-                self.root.after(0, lambda err=str(exc): self._on_login_error(err))
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _on_login_error(self, err: str) -> None:
-        self.login_btn.configure(state="normal", text="Sign in with Discord")
-        self.footer_error.configure(text=f"Sign-in failed: {err}")
-
-    def _on_signed_in(self, session: dict[str, Any], account: dict[str, Any]) -> None:
-        self.login_btn.configure(state="normal", text="Sign in with Discord")
-        with self.cfg_lock:
-            self.cfg["session"] = session
-            if "mute_at_percent" in account:
-                pct = float(account["mute_at_percent"])
-                self.cfg["mute_at_percent"] = pct
-                self.percent_var.set(pct)
-                self.percent_entry_var.set(f"{pct:.0f}")
-        self._save_cfg()
-
-        self.account = account
-        self._render_auth_state()
-        self._update_sidebar_badges()
-
-    def _sign_out(self) -> None:
-        self.account = None
-        with self.cfg_lock:
-            self.cfg["session"] = None
-        self._save_cfg()
-        self._render_auth_state()
-
     def _cleanup_sync(self) -> None:
         if hasattr(self, "watcher") and self.watcher:
             self.watcher.stop()
@@ -1937,15 +1630,12 @@ def main() -> None:
     if "--self-check" in sys.argv:
         from screen_reader import WinRtPercentOcr
 
-        cfg = load_config()
-        url, key = resolve_supabase_credentials(cfg)
         ocr = WinRtPercentOcr()
         try:
             assert ocr.available(), "Windows.Media.Ocr engine unavailable"
         finally:
             ocr.close()
         _ = list_mute_targets(include_background_audio=False)
-        assert bool(url and key), "Supabase config missing"
         return
 
     root = tk.Tk()
