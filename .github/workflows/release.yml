@@ -13,6 +13,12 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r app/requirements.txt
+      - name: Bake release version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $ver = "${{ github.ref_name }}".TrimStart('v', 'V')
+          python -c "from pathlib import Path; import re; p = Path('app/updater.py'); p.write_text(re.sub(r'^APP_VERSION = \".*\"', f'APP_VERSION = \"$ver\"', p.read_text(encoding='utf-8'), flags=re.M), encoding='utf-8')"
       - run: python -m unittest discover -s tests -v
       - run: pyinstaller --onefile --noconsole --name GDQuiet --paths app --collect-submodules winrt --collect-binaries winrt --collect-data winrt --hidden-import=PIL._tkinter_finder app/gdquiet.py
       - uses: actions/upload-artifact@v4

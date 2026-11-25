@@ -8,6 +8,7 @@ import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 from typing import Any, Callable
+import webbrowser
 
 import mss
 from PIL import Image, ImageEnhance, ImageTk
@@ -21,6 +22,17 @@ from screen_reader import (
     find_window_client_rect,
     get_virtual_screen_bounds,
 )
+from updater import (
+    APP_VERSION,
+    RELEASES_PAGE_URL,
+    UpdateError,
+    UpdateInfo,
+    check_for_update,
+    current_executable_path,
+    download_update,
+    is_packaged_executable,
+    launch_update_swap_and_restart,
+)
 from window_audio import (
     AudioMuteController,
     MuteTarget,
@@ -32,6 +44,14 @@ try:
     ctypes.windll.shcore.SetProcessDpiAwareness(1)
 except Exception:
     pass
+
+
+PERCENT_PRESETS: tuple[tuple[str, float, float, float, float], ...] = (
+    ("Top Center", 0.34, 0.00, 0.32, 0.11),
+    ("Top Left", 0.00, 0.00, 0.28, 0.11),
+    ("Top Right", 0.72, 0.00, 0.28, 0.11),
+    ("Bottom Center", 0.34, 0.88, 0.32, 0.12),
+)
 
 
 COLORS = {
@@ -67,7 +87,7 @@ class RegionSelectorOverlay:
         self.on_cancel = on_cancel
         self.vx, self.vy, self.vw, self.vh = get_virtual_screen_bounds()
 
-        with mss.mss() as sct:
+        with mss.MSS() as sct:
             shot = sct.grab({"left": self.vx, "top": self.vy, "width": self.vw, "height": self.vh})
             raw_img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
 
@@ -75,6 +95,7 @@ class RegionSelectorOverlay:
         self._photo = ImageTk.PhotoImage(dimmed)
         self._start: tuple[int, int] | None = None
         self._rect_id: int | None = None
+        self._size_id: int | None = None
 
         self.win = tk.Toplevel(parent)
         self.win.overrideredirect(True)
@@ -86,13 +107,13 @@ class RegionSelectorOverlay:
         self.canvas.pack(fill="both", expand=True)
         self.canvas.create_image(0, 0, image=self._photo, anchor="nw")
         self.canvas.create_rectangle(
-            self.vw // 2 - 340, 14, self.vw // 2 + 340, 52,
+            self.vw // 2 - 350, 14, self.vw // 2 + 350, 52,
             fill="#0b0f17", outline="#38bdf8", width=1,
         )
         self.canvas.create_text(
             self.vw // 2,
             33,
-            text="Drag a box around the % number on screen  •  Press Esc to cancel",
+            text="Drag a box tightly around the % number  •  Release to save  •  Esc to cancel",
             fill="#f8fafc",
             font=("Segoe UI", 11, "bold"),
         )
@@ -107,6 +128,8 @@ class RegionSelectorOverlay:
         self._start = (int(event.x), int(event.y))
         if self._rect_id is not None:
             self.canvas.delete(self._rect_id)
+        if self._size_id is not None:
+            self.canvas.delete(self._size_id)
         self._rect_id = self.canvas.create_rectangle(
             event.x,
             event.y,
@@ -115,11 +138,24 @@ class RegionSelectorOverlay:
             outline="#38bdf8",
             width=2,
         )
+        self._size_id = self.canvas.create_text(
+            event.x + 8,
+            max(64, event.y - 12),
+            text="0×0 px",
+            fill="#38bdf8",
+            anchor="w",
+            font=("Consolas", 10, "bold"),
+        )
 
     def _on_drag(self, event: tk.Event) -> None:
         if not self._start or self._rect_id is None:
             return
-        self.canvas.coords(self._rect_id, self._start[0], self._start[1], event.x, event.y)
+        x0, y0 = self._start
+        x1, y1 = int(event.x), int(event.y)
+        self.canvas.coords(self._rect_id, x0, y0, x1, y1)
+        if self._size_id is not None:
+            self.canvas.coords(self._size_id, min(x0, x1), max(64, min(y0, y1) - 12))
+            self.canvas.itemconfigure(self._size_id, text=f"{abs(x1 - x0)}×{abs(y1 - y0)} px")
 
     def _on_release(self, event: tk.Event) -> None:
         if not self._start:
@@ -173,6 +209,10 @@ class GDQuietApp:
         self.recording_hotkey = False
         self._hk_capture_state: tuple[tk.Button, str, str, Callable[[], None] | None] | None = None
         self.global_hotkey = GlobalHotkeyWatcher(on_trigger=self._on_global_watch_toggle)
+        self._pending_update: UpdateInfo | None = None
+        self._updating = False
+        self._region_delay_id: str | None = None
+        self._last_audio_enforce_at = 0.0
         self.window_vars: dict[str, tk.BooleanVar] = {}
         self._all_targets: list[MuteTarget] = []
         self._latest_reading: ScreenReading | None = None
@@ -198,6 +238,9 @@ class GDQuietApp:
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         atexit.register(self._cleanup_sync)
         self.root.after(150, self._test_ui_tick)
+        self._startup_update_id: str | None = self.root.after(
+            1500, lambda: self._check_updates_async(silent=True)
+        )
 
     def _snapshot_cfg(self) -> dict[str, Any]:
         with self.cfg_lock:
@@ -307,7 +350,7 @@ class GDQuietApp:
         )
         tk.Label(
             brand_txt,
-            text="Screen-reading muter",
+            text=f"v{APP_VERSION} • Screen muter",
             bg=COLORS["sidebar"],
             fg=COLORS["subtext"],
             font=("Segoe UI", 8),
@@ -408,7 +451,7 @@ class GDQuietApp:
             bg=COLORS["card_alt"],
             pady=8,
         )
-        self.watch_toggle_btn.pack(fill="x", pady=(10, 4))
+        self.watch_toggle_btn.pack(fill="x", pady=(8, 4))
 
         self.reset_mute_btn = self._make_button(
             sidebar,
@@ -420,16 +463,26 @@ class GDQuietApp:
         )
         self.reset_mute_btn.pack(fill="x", pady=(0, 4))
 
+        self.update_btn = self._make_button(
+            sidebar,
+            "Check for Updates",
+            self._on_update_button_click,
+            bg=COLORS["card_alt"],
+            pady=6,
+            font=("Segoe UI", 8, "bold"),
+        )
+        self.update_btn.pack(fill="x", pady=(0, 2))
+
         self.footer_error = tk.Label(
             sidebar,
             text="",
             bg=COLORS["sidebar"],
-            fg=COLORS["amber"],
+            fg=COLORS["subtext"],
             font=("Segoe UI", 8),
             wraplength=200,
             justify="left",
         )
-        self.footer_error.pack(anchor="w", pady=(4, 0))
+        self.footer_error.pack(anchor="w", pady=(2, 0))
 
         # Divider
         tk.Frame(shell, bg=COLORS["border"], width=1).pack(side="left", fill="y")
@@ -640,7 +693,17 @@ class GDQuietApp:
             pady=5,
             font=("Segoe UI", 8, "bold"),
         )
-        self.summary_capture_btn.pack(side="left")
+        self.summary_capture_btn.pack(side="left", padx=(0, 8))
+
+        self._make_button(
+            chips,
+            "Pick % Spot",
+            self._start_region_pick,
+            bg=COLORS["card_alt"],
+            padx=10,
+            pady=5,
+            font=("Segoe UI", 8, "bold"),
+        ).pack(side="left")
 
         # Card 2: 30-Second Screen Test
         test_card = self._make_card(page)
@@ -1188,17 +1251,54 @@ class GDQuietApp:
         self.target_combo.bind("<Return>", lambda _e: self._on_target_proc_change())
         self._make_button(row1, "Refresh", self._refresh_target_windows, padx=10, pady=4).pack(side="left")
 
+        presets_row = tk.Frame(cap_card, bg=COLORS["card"])
+        presets_row.pack(fill="x", pady=(0, 10))
+        tk.Label(
+            presets_row,
+            text="Quick % Spot:",
+            bg=COLORS["card"],
+            fg=COLORS["text"],
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side="left", padx=(0, 8))
+        self._make_button(
+            presets_row,
+            "Auto Top 10%",
+            self._reset_auto_region,
+            padx=9,
+            pady=4,
+            font=("Segoe UI", 8, "bold"),
+        ).pack(side="left", padx=(0, 6))
+        for p_label, p_rx, p_ry, p_rw, p_rh in PERCENT_PRESETS:
+            self._make_button(
+                presets_row,
+                p_label,
+                lambda lbl=p_label, rx=p_rx, ry=p_ry, rw=p_rw, rh=p_rh: self._apply_region_preset(
+                    lbl, rx, ry, rw, rh
+                ),
+                padx=9,
+                pady=4,
+                font=("Segoe UI", 8, "bold"),
+            ).pack(side="left", padx=(0, 6))
+
         row2 = tk.Frame(cap_card, bg=COLORS["card"])
         row2.pack(fill="x")
         self._make_button(
             row2,
-            "Pick Screen Region",
+            "Drag Box on Screen",
             self._start_region_pick,
             bg=COLORS["cyan"],
             fg="#082f49",
             hover_bg="#7dd3fc",
-        ).pack(side="left", padx=(0, 10))
-        self._make_button(row2, "Reset to Auto Top 10%", self._reset_auto_region).pack(side="left", padx=(0, 12))
+        ).pack(side="left", padx=(0, 8))
+        self.delay_pick_btn = self._make_button(
+            row2,
+            "Pick with 3s Delay",
+            self._start_region_pick_delayed,
+            padx=10,
+            pady=6,
+            font=("Segoe UI", 8, "bold"),
+        )
+        self.delay_pick_btn.pack(side="left", padx=(0, 12))
         self.region_mode_label = tk.Label(
             row2,
             text=self._describe_region_mode(),
@@ -1440,6 +1540,9 @@ class GDQuietApp:
         mode = self.cfg.get("watch_mode")
         reg = self.cfg.get("custom_region")
         if mode == "custom_region" and isinstance(reg, dict):
+            preset = reg.get("preset")
+            if preset:
+                return f"Preset: {preset}"
             if reg.get("kind") == "window_rel":
                 return "Custom box (locked to window)"
             if reg.get("kind") == "screen":
@@ -1530,7 +1633,36 @@ class GDQuietApp:
         self._save_cfg()
         self._update_sidebar_badges()
 
+    def _cancel_delay_pick(self) -> None:
+        if self._region_delay_id is not None:
+            try:
+                self.root.after_cancel(self._region_delay_id)
+            except Exception:
+                pass
+            self._region_delay_id = None
+        btn = getattr(self, "delay_pick_btn", None)
+        if btn is not None:
+            btn.configure(text="Pick with 3s Delay", bg=COLORS["card_alt"])
+            btn._base_bg = COLORS["card_alt"]  # type: ignore[attr-defined]
+
+    def _start_region_pick_delayed(self) -> None:
+        if self._region_delay_id is not None:
+            self._cancel_delay_pick()
+            return
+
+        def step(remaining: int) -> None:
+            if remaining <= 0:
+                self._cancel_delay_pick()
+                self._start_region_pick()
+                return
+            self.delay_pick_btn.configure(text=f"Switch to GD ({remaining}s)...", bg=COLORS["amber"], fg="#111827")
+            self.delay_pick_btn._base_bg = COLORS["amber"]  # type: ignore[attr-defined]
+            self._region_delay_id = self.root.after(1000, lambda r=remaining - 1: step(r))
+
+        step(3)
+
     def _start_region_pick(self) -> None:
+        self._cancel_delay_pick()
         self.root.withdraw()
         self.root.after(220, self._open_region_overlay)
 
@@ -1540,6 +1672,24 @@ class GDQuietApp:
             on_selected=self._on_region_selected,
             on_cancel=self._on_region_cancelled,
         )
+
+    def _apply_region_preset(self, label: str, rx: float, ry: float, rw: float, rh: float) -> None:
+        target_proc = self.target_proc_var.get().strip().lower() or "geometrydash.exe"
+        region: dict[str, Any] = {
+            "kind": "window_rel",
+            "process": target_proc,
+            "preset": label,
+            "rx": rx,
+            "ry": ry,
+            "rw": rw,
+            "rh": rh,
+        }
+        with self.cfg_lock:
+            self.cfg["watch_mode"] = "custom_region"
+            self.cfg["custom_region"] = region
+        self._save_cfg()
+        self.region_mode_label.configure(text=self._describe_region_mode())
+        self._update_sidebar_badges()
 
     def _on_region_selected(self, left: int, top: int, width: int, height: int) -> None:
         self.root.deiconify()
@@ -1598,9 +1748,16 @@ class GDQuietApp:
                 just_finished = self.test_session.record(reading.percent)
 
         effective_mute = False if testing else reading.should_mute
+        now_m = time.monotonic()
         if effective_mute != self.current_want_mute:
             self.current_want_mute = effective_mute
+            if effective_mute:
+                self._last_audio_enforce_at = now_m
             self._apply_mute_state(effective_mute)
+        elif effective_mute and (now_m - self._last_audio_enforce_at) >= 0.4:
+            # Periodically re-mute so newly opened Chrome/browser audio streams stay muted.
+            self._last_audio_enforce_at = now_m
+            self._apply_mute_state(True, force_reapply=True)
 
         with self.reading_lock:
             self._latest_reading = reading
@@ -1709,7 +1866,11 @@ class GDQuietApp:
         else:
             self.summary_discord_btn.configure(text="Discord Deafen: Off")
 
-        reg_mode = "Custom" if self.cfg.get("watch_mode") == "custom_region" else "Auto"
+        reg = self.cfg.get("custom_region")
+        if self.cfg.get("watch_mode") == "custom_region":
+            reg_mode = str(reg.get("preset")) if isinstance(reg, dict) and reg.get("preset") else "Custom"
+        else:
+            reg_mode = "Auto"
         self.summary_capture_btn.configure(text=f"Capture: {reg_mode} ({proc})")
 
         badge = getattr(self, "tutorial_step3_badge", None)
@@ -2044,6 +2205,113 @@ class GDQuietApp:
         self._update_sidebar_badges()
         self._update_status_indicators()
 
+    def _on_update_button_click(self) -> None:
+        if self._updating:
+            return
+        if self._pending_update is not None and self._pending_update.update_available:
+            self._prompt_and_install_update(self._pending_update)
+        else:
+            self._check_updates_async(silent=False)
+
+    def _check_updates_async(self, silent: bool = True) -> None:
+        if self._updating:
+            return
+        if not silent:
+            self.update_btn.configure(state="disabled", text="Checking...")
+            self.footer_error.configure(text="")
+
+        def worker() -> None:
+            try:
+                info = check_for_update(current_version=APP_VERSION)
+                self.root.after(0, lambda i=info, s=silent: self._on_update_checked(i, s))
+            except Exception as exc:
+                self.root.after(0, lambda err=str(exc), s=silent: self._on_update_check_failed(err, s))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_update_checked(self, info: UpdateInfo, silent: bool) -> None:
+        if not self._updating:
+            self.update_btn.configure(state="normal")
+        if info.update_available:
+            self._pending_update = info
+            self.update_btn.configure(
+                text=f"Install v{info.latest_version} Update",
+                bg=COLORS["cyan_dark"],
+                fg=COLORS["text"],
+            )
+            self.update_btn._base_bg = COLORS["cyan_dark"]  # type: ignore[attr-defined]
+            self.update_btn._hover_bg = COLORS["cyan"]  # type: ignore[attr-defined]
+            self.footer_error.configure(text=f"Update v{info.latest_version} ready!", fg=COLORS["cyan"])
+            if not silent:
+                self._prompt_and_install_update(info)
+        else:
+            self._pending_update = None
+            self.update_btn.configure(text="Check for Updates", bg=COLORS["card_alt"], fg=COLORS["text"])
+            self.update_btn._base_bg = COLORS["card_alt"]  # type: ignore[attr-defined]
+            self.update_btn._hover_bg = COLORS["hover"]  # type: ignore[attr-defined]
+            if not silent:
+                self.footer_error.configure(text=f"Up to date (v{APP_VERSION})", fg=COLORS["green"])
+                messagebox.showinfo("Up to Date", f"You are already running the latest version (v{APP_VERSION}).")
+
+    def _on_update_check_failed(self, err: str, silent: bool) -> None:
+        if not self._updating:
+            self.update_btn.configure(state="normal", text="Check for Updates")
+        if not silent:
+            self.footer_error.configure(text=f"Update check failed: {err}", fg=COLORS["amber"])
+
+    def _prompt_and_install_update(self, info: UpdateInfo) -> None:
+        if not is_packaged_executable():
+            if messagebox.askyesno(
+                "Update Available",
+                f"GD Quiet v{info.latest_version} is available (running from Python source v{info.current_version}).\n\nOpen the GitHub release page?",
+            ):
+                webbrowser.open(info.release_url or RELEASES_PAGE_URL)
+            return
+
+        if not messagebox.askyesno(
+            "Install Update",
+            f"GD Quiet v{info.latest_version} is available (you have v{info.current_version}).\n\nDownload and install now? GD Quiet will restart automatically.",
+        ):
+            return
+
+        self._updating = True
+        self.update_btn.configure(state="disabled", text="Downloading 0%...")
+        self.footer_error.configure(text=f"Downloading v{info.latest_version}...", fg=COLORS["cyan"])
+
+        def worker() -> None:
+            try:
+                target_exe = current_executable_path()
+
+                def on_prog(done: int, total: int) -> None:
+                    pct_txt = f"{int(done * 100 / total)}%" if total > 0 else f"{done // 1024} KB"
+                    try:
+                        self.root.after(0, lambda t=pct_txt: self.update_btn.configure(text=f"Downloading {t}..."))
+                    except Exception:
+                        pass
+
+                staged = download_update(info, target_exe, progress_cb=on_prog)
+                try:
+                    self.root.after(0, lambda: self.update_btn.configure(text="Restarting..."))
+                except Exception:
+                    pass
+                launch_update_swap_and_restart(staged, target_exe)
+                self.root.after(0, self._finish_update_and_exit)
+            except UpdateError as exc:
+                self.root.after(0, lambda err=str(exc): self._on_update_install_failed(err))
+            except Exception as exc:
+                self.root.after(0, lambda err=str(exc): self._on_update_install_failed(err))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_update_install_failed(self, err: str) -> None:
+        self._updating = False
+        self.update_btn.configure(state="normal", text="Retry Update")
+        self.footer_error.configure(text=f"Update failed: {err}", fg=COLORS["amber"])
+        messagebox.showerror("Update Failed", err)
+
+    def _finish_update_and_exit(self) -> None:
+        self._on_close()
+
     def _cleanup_sync(self) -> None:
         if hasattr(self, "global_hotkey") and self.global_hotkey:
             self.global_hotkey.stop()
@@ -2059,6 +2327,13 @@ class GDQuietApp:
             self.discord_ctrl.restore(self.cfg.get("deafen_hotkey"))
 
     def _on_close(self) -> None:
+        self._cancel_delay_pick()
+        if getattr(self, "_startup_update_id", None) is not None:
+            try:
+                self.root.after_cancel(self._startup_update_id)
+            except Exception:
+                pass
+            self._startup_update_id = None
         self._cleanup_sync()
         self._save_cfg()
         self.root.destroy()

@@ -370,12 +370,14 @@ class PercentStateDebouncer:
         self.last_percent: float | None = None
         self.last_seen_at = 0.0
         self._high_streak = 0
+        self._low_streak = 0
 
     def reset(self) -> None:
         self.is_muted = False
         self.last_percent = None
         self.last_seen_at = 0.0
         self._high_streak = 0
+        self._low_streak = 0
 
     def update(
         self,
@@ -389,6 +391,7 @@ class PercentStateDebouncer:
 
         if percent is None:
             self._high_streak = 0
+            self._low_streak = 0
             if self.last_seen_at > 0 and (ts - self.last_seen_at) >= self.missing_timeout_s:
                 self.is_muted = False
                 self.last_percent = None
@@ -401,14 +404,19 @@ class PercentStateDebouncer:
 
         if unmute_at_100 and percent >= 99.95:
             self._high_streak = 0
+            self._low_streak = 0
             self.is_muted = False
             return False, True
 
         if percent < threshold:
             self._high_streak = 0
-            self.is_muted = False
-            return False, True
+            self._low_streak += 1
+            # Unmute right away at 0% death respawn; require 2 frames otherwise to ignore 1-frame OCR dips.
+            if not self.is_muted or percent <= 0.5 or self._low_streak >= 2:
+                self.is_muted = False
+            return self.is_muted, True
 
+        self._low_streak = 0
         # percent >= threshold: accept immediately on smooth progression, or 2 consecutive frames on a jump.
         smooth_cross = prev is not None and (threshold - 15.0) <= prev <= percent <= (prev + 15.0)
         self._high_streak += 1

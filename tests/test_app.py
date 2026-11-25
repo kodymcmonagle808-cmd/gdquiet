@@ -15,6 +15,7 @@ sys.path.insert(0, str(APP_DIR))
 import config  # noqa: E402
 import discord_hotkey  # noqa: E402
 import screen_reader  # noqa: E402
+import updater  # noqa: E402
 import window_audio  # noqa: E402
 
 
@@ -30,9 +31,10 @@ class FakeVolume:
 
 
 class FakeSession:
-    def __init__(self, name: str, pid: int, muted: int = 0) -> None:
+    def __init__(self, name: str, pid: int, muted: int = 0, instance_id: str = "") -> None:
         self.Process = SimpleNamespace(name=lambda: name, pid=pid)
         self.SimpleAudioVolume = FakeVolume(muted)
+        self.InstanceIdentifier = instance_id
 
 
 class GDQuietTests(unittest.TestCase):
@@ -438,6 +440,150 @@ class GDQuietTests(unittest.TestCase):
                     self.assertEqual(app.watch_hk_var.get(), "Not set")
                     self.assertEqual(app.watch_toggle_btn.cget("text"), "Pause Watching")
 
+                app._on_close()
+        finally:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+
+    def test_audio_mute_chrome_multiple_sessions_same_pid_and_reenforce(self) -> None:
+        tab1_manual = FakeSession("chrome.exe", 404, muted=1, instance_id="chrome-tab-1")
+        tab2_active = FakeSession("chrome.exe", 404, muted=0, instance_id="chrome-tab-2")
+        ctrl = window_audio.AudioMuteController()
+
+        with patch.object(window_audio.AudioUtilities, "GetAllSessions", return_value=[tab1_manual, tab2_active]):
+            ctrl.apply(["chrome.exe"], mute=True)
+            self.assertEqual(tab1_manual.SimpleAudioVolume.muted, 1)
+            self.assertEqual(tab2_active.SimpleAudioVolume.muted, 1)
+
+        # Chrome spawns a 3rd audio stream mid-run under the same PID -> re-enforce catches it
+        tab3_new = FakeSession("chrome.exe", 404, muted=0, instance_id="chrome-tab-3")
+        with patch.object(
+            window_audio.AudioUtilities, "GetAllSessions", return_value=[tab1_manual, tab2_active, tab3_new]
+        ):
+            ctrl.apply(["chrome.exe"], mute=True)
+            self.assertEqual(tab3_new.SimpleAudioVolume.muted, 1)
+
+            ctrl.apply(["chrome.exe"], mute=False)
+            self.assertEqual(tab1_manual.SimpleAudioVolume.muted, 1)
+            self.assertEqual(tab2_active.SimpleAudioVolume.muted, 0)
+            self.assertEqual(tab3_new.SimpleAudioVolume.muted, 0)
+
+    def test_debouncer_ignores_one_frame_dip_but_unmutes_at_0_and_2_frames(self) -> None:
+        deb = screen_reader.PercentStateDebouncer()
+        self.assertEqual(deb.update(48.0, 50.0, True, now=1.0), (False, True))
+        self.assertEqual(deb.update(62.0, 50.0, True, now=1.1), (True, True))
+        # Single-frame OCR dip from 62% -> 12% -> 63% must not blip audio unmuted
+        self.assertEqual(deb.update(12.0, 50.0, True, now=1.15), (True, True))
+        self.assertEqual(deb.update(63.0, 50.0, True, now=1.20), (True, True))
+        # 2 consecutive frames < threshold unmute smoothly
+        self.assertEqual(deb.update(14.0, 50.0, True, now=1.25), (True, True))
+        self.assertEqual(deb.update(15.0, 50.0, True, now=1.30), (False, True))
+
+    def test_updater_version_check_download_verify_and_script(self) -> None:
+        import hashlib
+        import io
+        import json
+        import tempfile
+
+        self.assertTrue(updater.is_newer_version("v3.0.8", "3.0.7"))
+        self.assertFalse(updater.is_newer_version("v3.0.7", "3.0.7"))
+        self.assertFalse(updater.is_newer_version("3.0.6", "3.0.7"))
+
+        payload = b"MZ" + b"\x90" * 512
+        sha = hashlib.sha256(payload).hexdigest()
+        release_json = json.dumps(
+            {
+                "tag_name": "v9.9.9",
+                "html_url": "https://github.com/kodymcmonagle808-cmd/gdquiet/releases/tag/v9.9.9",
+                "body": "Test release",
+                "assets": [
+                    {
+                        "name": "GDQuiet.exe",
+                        "browser_download_url": "https://github.com/kodymcmonagle808-cmd/gdquiet/releases/download/v9.9.9/GDQuiet.exe",
+                        "size": len(payload),
+                        "digest": f"sha256:{sha}",
+                    }
+                ],
+            }
+        ).encode("utf-8")
+
+        class FakeResp(io.BytesIO):
+            def __init__(self, data: bytes) -> None:
+                super().__init__(data)
+                self.headers = {"Content-Length": str(len(data))}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                self.close()
+
+        with patch("urllib.request.urlopen", return_value=FakeResp(release_json)):
+            info = updater.check_for_update(current_version="3.0.7")
+        self.assertTrue(info.update_available)
+        self.assertEqual(info.latest_version, "9.9.9")
+        self.assertEqual(info.sha256, sha)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target_exe = Path(tmp) / "GDQuiet.exe"
+            with patch("urllib.request.urlopen", return_value=FakeResp(payload)):
+                staged = updater.download_update(info, target_exe)
+            self.assertTrue(staged.is_file())
+            self.assertEqual(staged.read_bytes(), payload)
+
+            bad_info = updater.UpdateInfo(
+                current_version=info.current_version,
+                latest_version=info.latest_version,
+                tag_name=info.tag_name,
+                update_available=True,
+                download_url=info.download_url,
+                release_url=info.release_url,
+                asset_name=info.asset_name,
+                size_bytes=len(payload),
+                sha256="0" * 64,
+                release_notes="",
+            )
+            with patch("urllib.request.urlopen", return_value=FakeResp(payload)):
+                with self.assertRaises(updater.UpdateError):
+                    updater.download_update(bad_info, target_exe)
+
+            with patch("subprocess.Popen") as mock_popen:
+                script_path = updater.launch_update_swap_and_restart(staged, target_exe, current_pid=99999)
+                mock_popen.assert_called_once()
+                self.assertTrue(script_path.is_file())
+                script_text = script_path.read_text(encoding="utf-8")
+                self.assertIn("copy /y", script_text)
+                script_path.unlink(missing_ok=True)
+
+    def test_region_presets_and_capture_coords(self) -> None:
+        import tkinter as tk
+        import gdquiet
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            with (
+                patch.object(gdquiet, "load_config", return_value=dict(config.DEFAULT_CONFIG)),
+                patch.object(gdquiet, "save_config"),
+                patch.object(gdquiet, "list_mute_targets", return_value=[]),
+                patch.object(gdquiet, "list_open_window_processes", return_value=[]),
+                patch.object(gdquiet, "ScreenPercentWatcher"),
+            ):
+                app = gdquiet.GDQuietApp(root)
+                app._apply_region_preset("Top Left", 0.0, 0.0, 0.28, 0.11)
+                self.assertEqual(app.cfg["watch_mode"], "custom_region")
+                self.assertEqual(app._describe_region_mode(), "Preset: Top Left")
+                self.assertEqual(app.summary_capture_btn.cget("text"), "Capture: Top Left (geometrydash.exe)")
+
+                with patch.object(screen_reader, "find_window_client_rect", return_value=(100, 50, 1000, 500)):
+                    rect, _label = screen_reader.compute_capture_rect(
+                        app.cfg["watch_mode"],
+                        app.cfg["target_process"],
+                        app.cfg["custom_region"],
+                    )
+                    self.assertEqual(rect, {"left": 100, "top": 50, "width": 280, "height": 55})
                 app._on_close()
         finally:
             try:

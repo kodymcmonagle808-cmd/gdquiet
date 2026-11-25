@@ -234,13 +234,18 @@ class AudioMuteController:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._muted_sessions: set[tuple[str, int]] = set()
+        self._muted_sessions: set[tuple[str, int, str]] = set()
         self._is_muted = False
 
     @property
     def is_muted(self) -> bool:
         with self._lock:
             return self._is_muted
+
+    @staticmethod
+    def _session_key(session: Any, proc_name: str, pid: int) -> tuple[str, int, str]:
+        inst_id = str(getattr(session, "InstanceIdentifier", "") or "")
+        return (proc_name, pid, inst_id)
 
     def apply(self, selected_processes: Iterable[str], mute: bool) -> None:
         selected = {p.lower().strip() for p in selected_processes if p and p.strip()}
@@ -261,7 +266,7 @@ class AudioMuteController:
                                 continue
                             proc_name = session.Process.name().lower()
                             pid = int(session.Process.pid)
-                            key = (proc_name, pid)
+                            key = self._session_key(session, proc_name, pid)
                             vol = session.SimpleAudioVolume
 
                             if proc_name in selected:
@@ -282,7 +287,11 @@ class AudioMuteController:
                             try:
                                 if not session.Process:
                                     continue
-                                key = (session.Process.name().lower(), int(session.Process.pid))
+                                key = self._session_key(
+                                    session,
+                                    session.Process.name().lower(),
+                                    int(session.Process.pid),
+                                )
                                 if key in self._muted_sessions:
                                     session.SimpleAudioVolume.SetMute(0, None)
                             except Exception:
