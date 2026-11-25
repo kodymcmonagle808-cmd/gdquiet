@@ -184,6 +184,61 @@ class GDQuietTests(unittest.TestCase):
         self.assertIn("48.20%", headline)
         self.assertGreaterEqual(len(sess.milestones), 3)
 
+    def test_gui_stop_screen_test_early_does_not_deadlock(self) -> None:
+        import tkinter as tk
+        import gdquiet
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            with (
+                patch.object(gdquiet, "load_config", return_value=dict(config.DEFAULT_CONFIG)),
+                patch.object(gdquiet, "save_config"),
+                patch.object(gdquiet, "list_mute_targets", return_value=[]),
+                patch.object(gdquiet, "list_open_window_processes", return_value=[]),
+                patch.object(gdquiet, "ScreenPercentWatcher") as mock_watcher,
+            ):
+                app = gdquiet.GDQuietApp(root)
+                mock_watcher.return_value.start.assert_called_once()
+
+                # Start 30s test, simulate readings, then stop early (previously deadlocked!)
+                app._toggle_screen_test()
+                self.assertTrue(app.test_session.active)
+                app._on_screen_reading(
+                    screen_reader.ScreenReading(
+                        percent=24.5,
+                        raw_text="24.5%",
+                        should_mute=False,
+                        is_playing=True,
+                        status_text="Watching",
+                        preview_image=None,
+                    )
+                )
+                app._toggle_screen_test()
+                self.assertFalse(app.test_session.active)
+                self.assertTrue(app.test_session.completed)
+                self.assertEqual(app.test_btn.cget("text"), "Start 30s Test")
+
+                # Also verify natural expiration path in _test_ui_tick does not deadlock
+                app._toggle_screen_test()
+                app.test_session.start_time -= 31.0
+                app._test_ui_tick()
+                self.assertFalse(app.test_session.active)
+                self.assertTrue(app.test_session.completed)
+
+                # Exercise page tabs & watcher toggle
+                for page_key in ("apps", "discord", "capture", "dashboard"):
+                    app._show_page(page_key)
+                app._toggle_watching()
+                app._toggle_watching()
+                app._save_mute_percent()
+                app._on_close()
+        finally:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+
 
 if __name__ == "__main__":
     unittest.main()

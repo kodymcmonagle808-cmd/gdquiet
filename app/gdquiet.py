@@ -154,7 +154,7 @@ class GDQuietApp:
         self.root.minsize(860, 590)
         self.root.configure(bg=COLORS["bg"])
 
-        self.cfg_lock = threading.Lock()
+        self.cfg_lock = threading.RLock()
         self.cfg = load_config()
         url, anon_key = resolve_supabase_credentials(self.cfg)
         self.supabase = SupabaseClient(url, anon_key)
@@ -163,7 +163,7 @@ class GDQuietApp:
         self.discord_ctrl = DiscordDeafenController()
         self.apply_lock = threading.Lock()
         self.reading_lock = threading.Lock()
-        self.test_lock = threading.Lock()
+        self.test_lock = threading.RLock()
         self.test_session = ScreenTestSession(duration_s=30.0)
 
         self.account: dict[str, Any] | None = None
@@ -254,8 +254,15 @@ class GDQuietApp:
             pady=pady,
         )
         btn._base_bg = bg  # type: ignore[attr-defined]
-        btn.bind("<Enter>", lambda _e, b=btn, c=hbg: b.configure(bg=c) if str(b["state"]) != "disabled" else None)
-        btn.bind("<Leave>", lambda _e, b=btn: b.configure(bg=b._base_bg) if str(b["state"]) != "disabled" else None)  # type: ignore[attr-defined]
+        btn._hover_bg = hbg  # type: ignore[attr-defined]
+        btn.bind(
+            "<Enter>",
+            lambda _e, b=btn: b.configure(bg=b._hover_bg) if str(b["state"]) != "disabled" else None,  # type: ignore[attr-defined]
+        )
+        btn.bind(
+            "<Leave>",
+            lambda _e, b=btn: b.configure(bg=b._base_bg) if str(b["state"]) != "disabled" else None,  # type: ignore[attr-defined]
+        )
         return btn
 
     def _make_card(self, parent: tk.Widget, padx: int = 18, pady: int = 15) -> tk.Frame:
@@ -1077,27 +1084,35 @@ class GDQuietApp:
     # ---- 30-Second Screen Test Logic ----
 
     def _toggle_screen_test(self) -> None:
+        stopped_early = False
+        need_enable_watch = False
         with self.test_lock:
             if self.test_session.active:
                 self.test_session.stop()
-                self._finish_screen_test_ui()
-                return
+                stopped_early = True
+            else:
+                if not self.cfg.get("watch_enabled", True):
+                    with self.cfg_lock:
+                        self.cfg["watch_enabled"] = True
+                    need_enable_watch = True
+                self.test_session.start()
 
-            if not self.cfg.get("watch_enabled", True):
-                with self.cfg_lock:
-                    self.cfg["watch_enabled"] = True
-                self._save_cfg()
-                self.watch_toggle_btn.configure(text="Pause Watching")
+        if stopped_early:
+            self._finish_screen_test_ui()
+            return
 
-            self.test_session.start()
+        if need_enable_watch:
+            self._save_cfg()
+            self.watch_toggle_btn.configure(text="Pause Watching")
 
         # Clear any active mute immediately when starting dry-run test
         if self.current_want_mute:
             self._apply_mute_state(False)
 
         self.test_listbox.delete(0, "end")
-        self.test_btn.configure(text="Stop Test", bg=COLORS["red"], fg=COLORS["text"], hover_bg="#dc2626")
+        self.test_btn.configure(text="Stop Test", bg=COLORS["red"], fg=COLORS["text"], activebackground="#dc2626")
         self.test_btn._base_bg = COLORS["red"]  # type: ignore[attr-defined]
+        self.test_btn._hover_bg = "#dc2626"  # type: ignore[attr-defined]
         self.test_verdict_lbl.configure(
             text="Test running — switch to Geometry Dash and play a level for 30 seconds!",
             bg=COLORS["card_alt"],
@@ -1106,6 +1121,7 @@ class GDQuietApp:
         self._update_status_indicators()
 
     def _test_ui_tick(self) -> None:
+        just_completed = False
         with self.test_lock:
             active = self.test_session.active
             completed = self.test_session.completed
@@ -1121,7 +1137,10 @@ class GDQuietApp:
                 self.test_session.stop()
                 active = False
                 completed = True
-                self._finish_screen_test_ui_locked()
+                just_completed = True
+
+        if just_completed:
+            self._finish_screen_test_ui()
 
         if active or completed:
             ratio = max(0.0, min(1.0, elapsed / duration if duration > 0 else 1.0))
@@ -1151,12 +1170,10 @@ class GDQuietApp:
 
     def _finish_screen_test_ui(self) -> None:
         with self.test_lock:
-            self._finish_screen_test_ui_locked()
-
-    def _finish_screen_test_ui_locked(self) -> None:
-        passed, headline, detail = self.test_session.summary()
-        self.test_btn.configure(text="Start 30s Test", bg=COLORS["cyan"], fg="#082f49")
+            passed, headline, detail = self.test_session.summary()
+        self.test_btn.configure(text="Start 30s Test", bg=COLORS["cyan"], fg="#082f49", activebackground="#7dd3fc")
         self.test_btn._base_bg = COLORS["cyan"]  # type: ignore[attr-defined]
+        self.test_btn._hover_bg = "#7dd3fc"  # type: ignore[attr-defined]
         self.test_verdict_lbl.configure(
             text=f"{headline}  —  {detail}",
             bg=COLORS["green_bg"] if passed else COLORS["amber_bg"],
