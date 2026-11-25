@@ -5,14 +5,36 @@
 	},
 	"id": "kodymcmonagle.gdquiet",
 	"name": "GD Quiet",
-	"version": "v1.0.0",
+	"version": "v2.0.0",
 	"developer": "kodymcmonagle",
-	"description": "Mutes background apps past a chosen percent of a level.",
+	"description": "Reads level progress and syncs with your GDQuiet.exe companion app to mute selected open windows and deafen Discord.",
+	"links": {
+		"source": "https://github.com/kodymcmonagle808-cmd/gdquiet",
+		"homepage": "https://github.com/kodymcmonagle808-cmd/gdquiet"
+	},
+	"tags": [
+		"utility",
+		"gameplay",
+		"online"
+	],
 	"settings": {
+		"enabled": {
+			"type": "bool",
+			"name": "Enable GD Quiet",
+			"description": "Report level progress to your linked GD Quiet account.",
+			"default": true
+		},
+		"account-number": {
+			"type": "string",
+			"name": "Account Number",
+			"description": "8-digit account number shown in GDQuiet.exe after signing in with Discord.",
+			"default": "",
+			"filter": "0123456789"
+		},
 		"mute-at-percent": {
 			"type": "float",
-			"name": "Mute at percent",
-			"description": "Percent of the level at which other apps will be muted",
+			"name": "Fallback Mute Percent",
+			"description": "Percent threshold used before your account threshold syncs from Supabase (or if offline).",
 			"default": 50.0,
 			"min": 0.0,
 			"max": 100.0

@@ -11,6 +11,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: geode-sdk/build-geode-mod@main
         id: build
+        with:
+          sdk: 'v4.10.2'
+          bindings-ref: '5129d7d6dc7a1b7d6770a8a422e1b5266bed704e'
+        env:
+          GDQUIET_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          GDQUIET_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY || secrets.SUPABASE_ANON_KEY }}
       - uses: actions/upload-artifact@v4
         with:
           name: mod
@@ -22,13 +28,18 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v4
         with:
-          python-version: '3.x'
-      - run: pip install pycaw pyinstaller
-      - run: pyinstaller --onefile app/gdmute.py
+          python-version: '3.12'
+      - run: pip install -r app/requirements.txt
+      - name: Bake Supabase config from repository secrets
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY || secrets.SUPABASE_ANON_KEY }}
+        run: python -c "import json, os; u = os.environ.get('SUPABASE_URL', '').strip().rstrip('/'); k = os.environ.get('SUPABASE_ANON_KEY', '').strip(); open('app/build_config.py', 'w', encoding='utf-8').write(f'SUPABASE_URL = {json.dumps(u)}\nSUPABASE_ANON_KEY = {json.dumps(k)}\n')"
+      - run: pyinstaller --onefile --noconsole --name GDQuiet --paths app app/gdquiet.py
       - uses: actions/upload-artifact@v4
         with:
           name: app
-          path: dist/gdmute.exe
+          path: dist/GDQuiet.exe
 
   release:
     needs: [mod, app]
@@ -40,9 +51,9 @@ jobs:
         with:
           merge-multiple: true
           path: out
-      - run: cd out && zip ../gd-mute-mod.zip *.geode
-      - uses: softprops/action-gh-release@v2
+      - name: Upload direct .geode and GDQuiet.exe assets
+        uses: softprops/action-gh-release@v2
         with:
           files: |
-            gd-mute-mod.zip
-            out/gdmute.exe
+            out/*.geode
+            out/GDQuiet.exe
