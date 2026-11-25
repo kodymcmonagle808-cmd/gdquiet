@@ -14,6 +14,7 @@ jobs:
         with:
           sdk: 'v4.10.2'
           bindings-ref: '5129d7d6dc7a1b7d6770a8a422e1b5266bed704e'
+          configure-args: '-DSKIP_BUILDING_CODEGEN=OFF'
         env:
           GDQUIET_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           GDQUIET_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY || secrets.SUPABASE_ANON_KEY }}
