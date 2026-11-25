@@ -107,6 +107,10 @@ class GDQuietTests(unittest.TestCase):
         self.assertEqual(screen_reader.parse_percent_from_text("490/0"), 49.0)
         self.assertEqual(screen_reader.parse_percent_from_text("1000/0"), 100.0)
         self.assertEqual(screen_reader.parse_percent_from_text("542%"), 54.2)
+        self.assertEqual(screen_reader.parse_percent_from_text("O%"), 0.0)
+        self.assertEqual(screen_reader.parse_percent_from_text("o%"), 0.0)
+        self.assertEqual(screen_reader.parse_percent_from_text("00/0"), 0.0)
+        self.assertIsNone(screen_reader.parse_percent_from_text("NO%"))
         self.assertIsNone(screen_reader.parse_percent_from_text("Attempt 42"))
 
     def test_winrt_ocr_reads_rendered_hud_percentages(self) -> None:
@@ -254,6 +258,186 @@ class GDQuietTests(unittest.TestCase):
                 app._toggle_watching()
                 app._toggle_watching()
                 app._save_mute_percent()
+                app._on_close()
+        finally:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+
+    def test_death_after_passing_percent_always_undeafens(self) -> None:
+        import time
+
+        # 1. Passing threshold then dying to 0% unmutes immediately; missing-% past 0.35s also unmutes
+        deb = screen_reader.PercentStateDebouncer()
+        self.assertEqual(deb.update(48.0, 50.0, True, now=1.0), (False, True))
+        self.assertEqual(deb.update(55.0, 50.0, True, now=1.1), (True, True))
+        self.assertEqual(deb.update(0.0, 50.0, True, now=1.2), (False, True))
+
+        self.assertEqual(deb.update(49.0, 50.0, True, now=2.0), (False, True))
+        self.assertEqual(deb.update(64.0, 50.0, True, now=2.1), (True, True))
+        self.assertEqual(deb.update(None, 50.0, True, now=2.2), (True, True))
+        self.assertEqual(deb.update(None, 50.0, True, now=2.6), (False, False))
+
+        # 2. DiscordDeafenController enforces cooldown before toggling back to undeafen
+        press_times: list[float] = []
+        ctrl = discord_hotkey.DiscordDeafenController(toggle_cooldown_s=0.05)
+        hk = {"modifiers": ["ctrl", "shift"], "vk": ord("D"), "label": "Ctrl + Shift + D"}
+        with patch.object(discord_hotkey, "send_hotkey", side_effect=lambda _h: press_times.append(time.monotonic()) or True):
+            ctrl.set_deafened(True, hk, True)
+            self.assertTrue(ctrl.deafened_by_us)
+            ctrl.set_deafened(False, hk, True)
+            self.assertFalse(ctrl.deafened_by_us)
+        self.assertEqual(len(press_times), 2)
+        self.assertGreaterEqual(press_times[1] - press_times[0], 0.04)
+
+    def test_gui_pass_percent_then_death_and_force_restore(self) -> None:
+        import time
+        import tkinter as tk
+        import gdquiet
+
+        root = tk.Tk()
+        root.withdraw()
+        hotkey = {"modifiers": ["ctrl", "shift"], "vk": ord("D"), "label": "Ctrl + Shift + D"}
+        cfg = dict(config.DEFAULT_CONFIG, auto_deafen=True, deafen_hotkey=hotkey)
+        try:
+            with (
+                patch.object(gdquiet, "load_config", return_value=cfg),
+                patch.object(gdquiet, "save_config"),
+                patch.object(gdquiet, "list_mute_targets", return_value=[]),
+                patch.object(gdquiet, "list_open_window_processes", return_value=[]),
+                patch.object(gdquiet, "ScreenPercentWatcher"),
+                patch("discord_hotkey.send_hotkey", return_value=True) as mock_hotkey,
+                patch("window_audio.AudioUtilities.GetAllSessions", return_value=[]),
+            ):
+                app = gdquiet.GDQuietApp(root)
+                app.discord_ctrl._toggle_cooldown_s = 0.02
+
+                # Cross threshold -> should deafen Discord
+                app._on_screen_reading(
+                    screen_reader.ScreenReading(
+                        percent=62.0,
+                        raw_text="62%",
+                        should_mute=True,
+                        is_playing=True,
+                        status_text="Watching",
+                        preview_image=None,
+                        scan_ms=9.4,
+                    )
+                )
+                deadline = time.monotonic() + 2.0
+                while not app.discord_ctrl.deafened_by_us and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertTrue(app.discord_ctrl.deafened_by_us)
+
+                # Die -> should undeafen reliably via serialized worker
+                app._on_screen_reading(
+                    screen_reader.ScreenReading(
+                        percent=0.0,
+                        raw_text="0%",
+                        should_mute=False,
+                        is_playing=True,
+                        status_text="Watching",
+                        preview_image=None,
+                        scan_ms=8.1,
+                    )
+                )
+                deadline = time.monotonic() + 2.0
+                while app.discord_ctrl.deafened_by_us and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertFalse(app.discord_ctrl.deafened_by_us)
+                self.assertEqual(mock_hotkey.call_count, 2)
+
+                # Pass again and trigger failsafe Unmute & Undeafen button
+                app._on_screen_reading(
+                    screen_reader.ScreenReading(
+                        percent=75.0,
+                        raw_text="75%",
+                        should_mute=True,
+                        is_playing=True,
+                        status_text="Watching",
+                        preview_image=None,
+                        scan_ms=7.8,
+                    )
+                )
+                deadline = time.monotonic() + 2.0
+                while not app.discord_ctrl.deafened_by_us and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertTrue(app.discord_ctrl.deafened_by_us)
+
+                app._force_restore_all()
+                deadline = time.monotonic() + 2.0
+                while app.discord_ctrl.deafened_by_us and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertFalse(app.discord_ctrl.deafened_by_us)
+                self.assertEqual(mock_hotkey.call_count, 4)
+
+                app._on_close()
+        finally:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+
+    def test_global_watch_toggle_hotkey(self) -> None:
+        import threading
+        import tkinter as tk
+        import gdquiet
+
+        triggered = threading.Event()
+
+        watcher = discord_hotkey.GlobalHotkeyWatcher(on_trigger=triggered.set)
+        hk = {"modifiers": ["ctrl", "shift", "alt"], "vk": 0x7A, "label": "Ctrl + Shift + Alt + F11"}
+        try:
+            ok, msg = watcher.set_hotkey(hk)
+            self.assertTrue(ok, msg)
+            self.assertEqual(msg, "Active (Global)")
+            # Inject WM_HOTKEY directly into the registered thread message queue
+            discord_hotkey.user32.PostThreadMessageW(watcher._thread_id, discord_hotkey.WM_HOTKEY, watcher.HOTKEY_ID, 0)
+            self.assertTrue(triggered.wait(timeout=1.5))
+
+            with patch.object(discord_hotkey.user32, "RegisterHotKey", return_value=0), patch.object(
+                discord_hotkey.ctypes, "get_last_error", return_value=discord_hotkey.ERROR_HOTKEY_ALREADY_REGISTERED
+            ):
+                ok_conflict, msg_conflict = watcher.set_hotkey(hk)
+                self.assertFalse(ok_conflict)
+                self.assertEqual(msg_conflict, "In use by another app")
+        finally:
+            watcher.stop()
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            with (
+                patch.object(gdquiet, "load_config", return_value=dict(config.DEFAULT_CONFIG)),
+                patch.object(gdquiet, "save_config"),
+                patch.object(gdquiet, "list_mute_targets", return_value=[]),
+                patch.object(gdquiet, "list_open_window_processes", return_value=[]),
+                patch.object(gdquiet, "ScreenPercentWatcher"),
+            ):
+                app = gdquiet.GDQuietApp(root)
+                with patch.object(app.global_hotkey, "set_hotkey", return_value=(True, "Active (Global)")):
+                    with app.cfg_lock:
+                        app.cfg["watch_toggle_hotkey"] = {"modifiers": ["ctrl", "shift"], "vk": 0x78, "label": "Ctrl + Shift + F9"}
+                    app._apply_watch_toggle_hotkey()
+                    self.assertEqual(app.watch_hk_var.get(), "Ctrl + Shift + F9")
+                    self.assertEqual(app.watch_hk_status_lbl.cget("text"), "Active (Global)")
+                    self.assertEqual(app.watch_toggle_btn.cget("text"), "Pause Watching (Ctrl + Shift + F9)")
+
+                    app._toggle_watching()
+                    self.assertFalse(app.cfg["watch_enabled"])
+                    self.assertEqual(app.watch_toggle_btn.cget("text"), "Resume Watching (Ctrl + Shift + F9)")
+
+                    app._toggle_watching()
+                    self.assertTrue(app.cfg["watch_enabled"])
+                    self.assertEqual(app.watch_toggle_btn.cget("text"), "Pause Watching (Ctrl + Shift + F9)")
+
+                with patch.object(app.global_hotkey, "set_hotkey", return_value=(False, "Inactive")):
+                    app._clear_watch_hotkey()
+                    self.assertIsNone(app.cfg["watch_toggle_hotkey"])
+                    self.assertEqual(app.watch_hk_var.get(), "Not set")
+                    self.assertEqual(app.watch_toggle_btn.cget("text"), "Pause Watching")
+
                 app._on_close()
         finally:
             try:

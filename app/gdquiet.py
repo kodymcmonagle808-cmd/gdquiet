@@ -7,13 +7,13 @@ import threading
 import time
 import tkinter as tk
 from tkinter import messagebox, ttk
-from typing import Any
+from typing import Any, Callable
 
 import mss
 from PIL import Image, ImageEnhance, ImageTk
 
 from config import load_config, save_config
-from discord_hotkey import DiscordDeafenController, parse_tk_hotkey, send_hotkey
+from discord_hotkey import DiscordDeafenController, GlobalHotkeyWatcher, parse_tk_hotkey, send_hotkey
 from screen_reader import (
     ScreenPercentWatcher,
     ScreenReading,
@@ -159,12 +159,20 @@ class GDQuietApp:
         self.audio_ctrl = AudioMuteController()
         self.discord_ctrl = DiscordDeafenController()
         self.apply_lock = threading.Lock()
+        self._apply_cond = threading.Condition()
+        self._pending_mute: bool | None = None
+        self._force_reapply = False
+        self._apply_stop = False
+        self._apply_thread = threading.Thread(target=self._apply_worker, daemon=True)
+        self._apply_thread.start()
         self.reading_lock = threading.Lock()
         self.test_lock = threading.RLock()
         self.test_session = ScreenTestSession(duration_s=30.0)
 
         self.current_want_mute = False
         self.recording_hotkey = False
+        self._hk_capture_state: tuple[tk.Button, str, str, Callable[[], None] | None] | None = None
+        self.global_hotkey = GlobalHotkeyWatcher(on_trigger=self._on_global_watch_toggle)
         self.window_vars: dict[str, tk.BooleanVar] = {}
         self._all_targets: list[MuteTarget] = []
         self._latest_reading: ScreenReading | None = None
@@ -176,6 +184,7 @@ class GDQuietApp:
 
         self._setup_styles()
         self._build_ui()
+        self._apply_watch_toggle_hotkey()
         self._show_page("dashboard")
         self._refresh_windows()
         self._refresh_target_windows()
@@ -348,6 +357,15 @@ class GDQuietApp:
         )
         self.sidebar_thresh_lbl.pack(anchor="w")
 
+        self.sidebar_deaf_lbl = tk.Label(
+            status_box,
+            text="Audio & Discord: Clear",
+            bg=COLORS["card"],
+            fg=COLORS["subtext"],
+            font=("Segoe UI", 8),
+        )
+        self.sidebar_deaf_lbl.pack(anchor="w", pady=(2, 0))
+
         # Navigation Tabs
         nav_wrap = tk.Frame(sidebar, bg=COLORS["sidebar"])
         nav_wrap.pack(fill="x", expand=True, anchor="n")
@@ -382,7 +400,7 @@ class GDQuietApp:
             btn.pack(side="left", fill="x", expand=True)
             self._nav_buttons[key] = (row, indicator, btn)
 
-        # Sidebar bottom toggle
+        # Sidebar bottom controls
         self.watch_toggle_btn = self._make_button(
             sidebar,
             "Pause Watching" if self.cfg.get("watch_enabled", True) else "Resume Watching",
@@ -391,6 +409,16 @@ class GDQuietApp:
             pady=8,
         )
         self.watch_toggle_btn.pack(fill="x", pady=(10, 4))
+
+        self.reset_mute_btn = self._make_button(
+            sidebar,
+            "Unmute & Undeafen All",
+            self._force_restore_all,
+            bg=COLORS["card_alt"],
+            pady=6,
+            font=("Segoe UI", 8, "bold"),
+        )
+        self.reset_mute_btn.pack(fill="x", pady=(0, 4))
 
         self.footer_error = tk.Label(
             sidebar,
@@ -524,6 +552,61 @@ class GDQuietApp:
             hover_bg=COLORS["accent_hover"],
         )
         self.save_pct_btn.pack(side="left")
+
+        # Global Hotkey to Toggle % Checks On/Off
+        watch_hk_row = tk.Frame(trig_card, bg=COLORS["card"])
+        watch_hk_row.pack(fill="x", pady=(0, 12))
+
+        tk.Label(
+            watch_hk_row,
+            text="Toggle % Checks Hotkey:",
+            bg=COLORS["card"],
+            fg=COLORS["subtext"],
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side="left", padx=(0, 8))
+
+        watch_hk = self.cfg.get("watch_toggle_hotkey")
+        watch_hk_text = watch_hk.get("label", "Not set") if isinstance(watch_hk, dict) else "Not set"
+        self.watch_hk_var = tk.StringVar(value=watch_hk_text)
+        tk.Label(
+            watch_hk_row,
+            textvariable=self.watch_hk_var,
+            bg=COLORS["input"],
+            fg=COLORS["text"],
+            font=("Consolas", 9, "bold"),
+            padx=10,
+            pady=4,
+            width=18,
+            anchor="w",
+        ).pack(side="left", padx=(0, 8))
+
+        self.record_watch_hk_btn = self._make_button(
+            watch_hk_row,
+            "Record Hotkey",
+            self._start_watch_hotkey_record,
+            bg=COLORS["card_alt"],
+            padx=10,
+            pady=4,
+            font=("Segoe UI", 8, "bold"),
+        )
+        self.record_watch_hk_btn.pack(side="left", padx=(0, 6))
+        self._make_button(
+            watch_hk_row,
+            "Clear",
+            self._clear_watch_hotkey,
+            padx=8,
+            pady=4,
+            font=("Segoe UI", 8),
+        ).pack(side="left", padx=(0, 10))
+
+        self.watch_hk_status_lbl = tk.Label(
+            watch_hk_row,
+            text="Inactive",
+            bg=COLORS["card"],
+            fg=COLORS["subtext"],
+            font=("Segoe UI", 8, "bold"),
+        )
+        self.watch_hk_status_lbl.pack(side="left")
 
         # Summary Chips Row
         chips = tk.Frame(trig_card, bg=COLORS["card"])
@@ -809,16 +892,30 @@ class GDQuietApp:
         deaf_card = self._make_card(page, pady=12)
         deaf_card.pack(fill="x", pady=(0, 12))
 
+        deaf_hdr = tk.Frame(deaf_card, bg=COLORS["card"])
+        deaf_hdr.pack(fill="x")
         tk.Label(
-            deaf_card,
+            deaf_hdr,
             text="Toggle Deafen Hotkey",
             bg=COLORS["card"],
             fg=COLORS["text"],
             font=("Segoe UI", 12, "bold"),
-        ).pack(anchor="w")
+        ).pack(side="left")
+
+        self.discord_state_badge = tk.Label(
+            deaf_hdr,
+            text="Disabled",
+            bg=COLORS["pill_idle"],
+            fg=COLORS["subtext"],
+            font=("Segoe UI", 8, "bold"),
+            padx=8,
+            pady=2,
+        )
+        self.discord_state_badge.pack(side="right")
+
         tk.Label(
             deaf_card,
-            text="Set a keybind here and match it to Discord → Keybinds → Toggle Deafen.",
+            text="Set a keybind here and match it to Discord → Keybinds → Toggle Deafen (auto-undeafens on death, 100%, or exit).",
             bg=COLORS["card"],
             fg=COLORS["subtext"],
             font=("Segoe UI", 9),
@@ -1192,7 +1289,7 @@ class GDQuietApp:
 
         if need_enable_watch:
             self._save_cfg()
-            self.watch_toggle_btn.configure(text="Pause Watching")
+            self.watch_toggle_btn.configure(text=self._watch_toggle_btn_text())
 
         # Clear any active mute immediately when starting dry-run test
         if self.current_want_mute:
@@ -1349,14 +1446,70 @@ class GDQuietApp:
                 return f"Custom screen ({reg.get('width')}x{reg.get('height')})"
         return "Auto top 10%"
 
+    def _watch_toggle_btn_text(self) -> str:
+        enabled = bool(self.cfg.get("watch_enabled", True))
+        hk = self.cfg.get("watch_toggle_hotkey")
+        base = "Pause Watching" if enabled else "Resume Watching"
+        if isinstance(hk, dict) and hk.get("label"):
+            return f"{base} ({hk['label']})"
+        return base
+
+    def _on_global_watch_toggle(self) -> None:
+        try:
+            self.root.after(0, self._toggle_watching)
+        except Exception:
+            pass
+
+    def _apply_watch_toggle_hotkey(self) -> None:
+        with self.cfg_lock:
+            hk = self.cfg.get("watch_toggle_hotkey")
+        if isinstance(hk, dict):
+            self.watch_hk_var.set(str(hk.get("label") or "Set"))
+            active, status_msg = self.global_hotkey.set_hotkey(hk)
+            self.watch_hk_status_lbl.configure(
+                text=status_msg,
+                fg=COLORS["green"] if active else COLORS["amber"],
+            )
+        else:
+            self.watch_hk_var.set("Not set")
+            self.global_hotkey.set_hotkey(None)
+            self.watch_hk_status_lbl.configure(text="Inactive", fg=COLORS["subtext"])
+        self.watch_toggle_btn.configure(text=self._watch_toggle_btn_text())
+
+    def _start_watch_hotkey_record(self) -> None:
+        self.global_hotkey.set_hotkey(None)
+
+        def on_captured(parsed: dict[str, Any]) -> None:
+            with self.cfg_lock:
+                self.cfg["watch_toggle_hotkey"] = parsed
+            self._save_cfg()
+            self._apply_watch_toggle_hotkey()
+
+        self._begin_hotkey_capture(
+            button=self.record_watch_hk_btn,
+            base_bg=COLORS["card_alt"],
+            restore_text="Record Hotkey",
+            on_captured=on_captured,
+            on_cancel=self._apply_watch_toggle_hotkey,
+        )
+
+    def _clear_watch_hotkey(self) -> None:
+        with self.cfg_lock:
+            self.cfg["watch_toggle_hotkey"] = None
+        self._save_cfg()
+        self._apply_watch_toggle_hotkey()
+
     def _toggle_watching(self) -> None:
         new_val = not bool(self.cfg.get("watch_enabled", True))
         with self.cfg_lock:
             self.cfg["watch_enabled"] = new_val
         self._save_cfg()
 
-        self.watch_toggle_btn.configure(text="Pause Watching" if new_val else "Resume Watching")
+        self.watch_toggle_btn.configure(text=self._watch_toggle_btn_text())
         if not new_val:
+            watcher = getattr(self, "watcher", None)
+            if watcher is not None and hasattr(watcher, "_debouncer"):
+                watcher._debouncer.reset()
             self._apply_mute_state(False)
         self._update_status_indicators()
 
@@ -1470,8 +1623,9 @@ class GDQuietApp:
 
         if reading.percent is not None:
             self.sidebar_pct_lbl.configure(text=f"{reading.percent:.1f}%")
+            ms_part = f"  •  {reading.scan_ms:.0f}ms" if reading.scan_ms > 0 else ""
             self.detected_pct_label.configure(
-                text=f"Detected: {reading.percent:.2f}%   (OCR: {reading.raw_text!r})",
+                text=f"Detected: {reading.percent:.2f}%{ms_part}   (OCR: {reading.raw_text!r})",
                 fg=COLORS["red"] if reading.should_mute else COLORS["green"],
             )
         else:
@@ -1495,17 +1649,45 @@ class GDQuietApp:
         with self.test_lock:
             testing = self.test_session.active
 
+        deafened = self.discord_ctrl.deafened_by_us
+        apps_muted = self.audio_ctrl.is_muted
+        with self.cfg_lock:
+            auto_deaf = bool(self.cfg.get("auto_deafen", False))
+            hk = self.cfg.get("deafen_hotkey")
+
         if testing:
             color, txt = COLORS["cyan"], "TESTING (30s)"
         elif not self.cfg.get("watch_enabled", True):
             color, txt = COLORS["subtext"], "PAUSED"
-        elif self.audio_ctrl.is_muted or self.discord_ctrl.deafened_by_us:
+        elif apps_muted or deafened:
             color, txt = COLORS["red"], "MUTED"
         else:
             color, txt = COLORS["green"], "WATCHING"
 
         self.status_dot.itemconfigure(self._dot_id, fill=color)
         self.sidebar_status_lbl.configure(text=txt, fg=color)
+
+        deaf_lbl = getattr(self, "sidebar_deaf_lbl", None)
+        if deaf_lbl is not None:
+            if deafened and apps_muted:
+                deaf_lbl.configure(text="Apps & Discord: Muted", fg=COLORS["red"])
+            elif deafened:
+                deaf_lbl.configure(text="Discord: Deafened", fg=COLORS["red"])
+            elif apps_muted:
+                deaf_lbl.configure(text="Apps: Muted", fg=COLORS["red"])
+            else:
+                deaf_lbl.configure(text="Audio & Discord: Clear", fg=COLORS["subtext"])
+
+        dc_badge = getattr(self, "discord_state_badge", None)
+        if dc_badge is not None:
+            if deafened:
+                dc_badge.configure(text="Deafened by GD Quiet", bg=COLORS["red_bg"], fg=COLORS["red"])
+            elif auto_deaf and isinstance(hk, dict):
+                dc_badge.configure(text="Auto-Undeafen Ready", bg=COLORS["green_bg"], fg=COLORS["green"])
+            elif auto_deaf:
+                dc_badge.configure(text="Set Hotkey", bg=COLORS["amber_bg"], fg=COLORS["amber"])
+            else:
+                dc_badge.configure(text="Disabled", bg=COLORS["pill_idle"], fg=COLORS["subtext"])
 
     def _update_sidebar_badges(self) -> None:
         with self.cfg_lock:
@@ -1572,26 +1754,52 @@ class GDQuietApp:
         self._save_cfg()
         self._update_sidebar_badges()
 
-    def _apply_mute_state(self, want_mute: bool) -> None:
-        def worker() -> None:
+    def _apply_worker(self) -> None:
+        last_applied: bool | None = None
+        while True:
+            with self._apply_cond:
+                while not self._apply_stop and (
+                    self._pending_mute is None
+                    or (self._pending_mute == last_applied and not self._force_reapply)
+                ):
+                    self._apply_cond.wait()
+                if self._apply_stop:
+                    return
+                target_mute = bool(self._pending_mute)
+                self._pending_mute = None
+                self._force_reapply = False
+
             with self.apply_lock:
-                self.current_want_mute = want_mute
                 with self.cfg_lock:
                     selected = list(self.cfg.get("selected_apps") or [])
                     hotkey = self.cfg.get("deafen_hotkey")
                     auto_deafen = bool(self.cfg.get("auto_deafen", False))
-                self.audio_ctrl.apply(selected, want_mute)
+                self.audio_ctrl.apply(selected, target_mute)
                 self.discord_ctrl.set_deafened(
-                    want_deaf=want_mute,
+                    want_deaf=target_mute,
                     hotkey=hotkey,
                     enabled=auto_deafen,
                 )
+                last_applied = target_mute
             try:
                 self.root.after(0, self._update_status_indicators)
             except Exception:
                 pass
 
-        threading.Thread(target=worker, daemon=True).start()
+    def _apply_mute_state(self, want_mute: bool, force_reapply: bool = False) -> None:
+        with self._apply_cond:
+            self.current_want_mute = want_mute
+            self._pending_mute = want_mute
+            if force_reapply:
+                self._force_reapply = True
+            self._apply_cond.notify_all()
+
+    def _force_restore_all(self) -> None:
+        watcher = getattr(self, "watcher", None)
+        if watcher is not None and hasattr(watcher, "_debouncer"):
+            watcher._debouncer.reset()
+        self._apply_mute_state(False, force_reapply=True)
+        self._update_status_indicators()
 
     # ---- Apps Page ----
 
@@ -1609,7 +1817,7 @@ class GDQuietApp:
             var.set(False)
         self._update_sidebar_badges()
         if self.current_want_mute:
-            self._apply_mute_state(True)
+            self._apply_mute_state(True, force_reapply=True)
 
     def _on_app_checkbox_toggle(self, proc_name: str, var: tk.BooleanVar) -> None:
         with self.cfg_lock:
@@ -1623,7 +1831,7 @@ class GDQuietApp:
         self._update_sidebar_badges()
 
         if self.current_want_mute:
-            self._apply_mute_state(True)
+            self._apply_mute_state(True, force_reapply=True)
 
     def _refresh_windows(self) -> None:
         include_bg = bool(self.bg_audio_var.get())
@@ -1753,46 +1961,69 @@ class GDQuietApp:
             self.cfg["auto_deafen"] = enabled
         self._save_cfg()
         self._update_sidebar_badges()
-        if not enabled:
-            threading.Thread(
-                target=lambda: self.discord_ctrl.restore(self.cfg.get("deafen_hotkey")),
-                daemon=True,
-            ).start()
+        self._update_status_indicators()
+        self._apply_mute_state(self.current_want_mute, force_reapply=True)
 
-    def _start_hotkey_record(self) -> None:
+    def _begin_hotkey_capture(
+        self,
+        button: tk.Button,
+        base_bg: str,
+        restore_text: str,
+        on_captured: Callable[[dict[str, Any]], None],
+        on_cancel: Callable[[], None] | None = None,
+    ) -> None:
         if self.recording_hotkey:
-            return
+            self._finish_hotkey_capture(cancelled=True)
         self.recording_hotkey = True
-        self.record_hk_btn.configure(text="Press keys (Esc cancels)...", bg=COLORS["amber"], fg="#111827")
-        self.record_hk_btn._base_bg = COLORS["amber"]  # type: ignore[attr-defined]
+        self._hk_capture_state = (button, base_bg, restore_text, on_cancel)
+        button.configure(text="Press keys (Esc cancels)...", bg=COLORS["amber"], fg="#111827")
+        button._base_bg = COLORS["amber"]  # type: ignore[attr-defined]
         self.root.focus_force()
 
         def on_key(event: tk.Event) -> str:
             if event.keysym == "Escape":
-                self._stop_hotkey_record()
+                self._finish_hotkey_capture(cancelled=True)
                 return "break"
             parsed = parse_tk_hotkey(event)
             if parsed is None:
                 return "break"
-            with self.cfg_lock:
-                self.cfg["deafen_hotkey"] = parsed
-            self._save_cfg()
-            self.hotkey_var.set(parsed["label"])
-            self._update_sidebar_badges()
-            self._stop_hotkey_record()
+            self._finish_hotkey_capture(cancelled=False)
+            on_captured(parsed)
             return "break"
 
         self._hk_bind_id = self.root.bind("<KeyPress>", on_key)
 
-    def _stop_hotkey_record(self) -> None:
+    def _finish_hotkey_capture(self, cancelled: bool = False) -> None:
         self.recording_hotkey = False
         if hasattr(self, "_hk_bind_id"):
             try:
                 self.root.unbind("<KeyPress>", self._hk_bind_id)
             except Exception:
                 pass
-        self.record_hk_btn.configure(text="Record Hotkey", bg=COLORS["accent"], fg=COLORS["text"])
-        self.record_hk_btn._base_bg = COLORS["accent"]  # type: ignore[attr-defined]
+        state = self._hk_capture_state
+        self._hk_capture_state = None
+        if state is not None:
+            button, base_bg, restore_text, on_cancel = state
+            button.configure(text=restore_text, bg=base_bg, fg=COLORS["text"])
+            button._base_bg = base_bg  # type: ignore[attr-defined]
+            if cancelled and on_cancel is not None:
+                on_cancel()
+
+    def _start_hotkey_record(self) -> None:
+        def on_captured(parsed: dict[str, Any]) -> None:
+            with self.cfg_lock:
+                self.cfg["deafen_hotkey"] = parsed
+            self._save_cfg()
+            self.hotkey_var.set(parsed["label"])
+            self._update_sidebar_badges()
+            self._update_status_indicators()
+
+        self._begin_hotkey_capture(
+            button=self.record_hk_btn,
+            base_bg=COLORS["accent"],
+            restore_text="Record Hotkey",
+            on_captured=on_captured,
+        )
 
     def _test_hotkey(self) -> None:
         hk = self.cfg.get("deafen_hotkey")
@@ -1803,14 +2034,26 @@ class GDQuietApp:
 
     def _clear_hotkey(self) -> None:
         with self.cfg_lock:
+            prev_hk = self.cfg.get("deafen_hotkey")
             self.cfg["deafen_hotkey"] = None
         self._save_cfg()
+        if self.discord_ctrl.deafened_by_us and prev_hk:
+            with self.apply_lock:
+                self.discord_ctrl.restore(prev_hk)
         self.hotkey_var.set("Not set")
         self._update_sidebar_badges()
+        self._update_status_indicators()
 
     def _cleanup_sync(self) -> None:
+        if hasattr(self, "global_hotkey") and self.global_hotkey:
+            self.global_hotkey.stop()
         if hasattr(self, "watcher") and self.watcher:
             self.watcher.stop()
+        with self._apply_cond:
+            self._apply_stop = True
+            self._apply_cond.notify_all()
+        if hasattr(self, "_apply_thread") and self._apply_thread.is_alive():
+            self._apply_thread.join(timeout=0.5)
         with self.apply_lock:
             self.audio_ctrl.restore()
             self.discord_ctrl.restore(self.cfg.get("deafen_hotkey"))

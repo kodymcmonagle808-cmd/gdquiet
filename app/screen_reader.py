@@ -257,8 +257,9 @@ def parse_percent_from_text(text: str, last_percent: float | None = None) -> flo
     if not text:
         return None
     norm = text.replace("\n", " ").replace("\r", " ")
-    # Windows OCR commonly reads bold outlined '%' as '0/0' or 'o/0'.
+    # Windows OCR commonly reads bold outlined '%' as '0/0' or 'o/0', and '0%' as 'O%'.
     norm = re.sub(r"[0oO°]\s*/\s*[0oO]", "%", norm)
+    norm = re.sub(r"(?<![A-Za-z0-9])[Oo](?=%)", "0", norm)
 
     candidates: list[float] = []
     for match in _PERCENT_RE.finditer(norm):
@@ -363,7 +364,7 @@ class WinRtPercentOcr:
 class PercentStateDebouncer:
     """Converts noisy frame-by-frame OCR readings into clean mute/unmute transitions."""
 
-    def __init__(self, missing_timeout_s: float = 0.65) -> None:
+    def __init__(self, missing_timeout_s: float = 0.35) -> None:
         self.missing_timeout_s = missing_timeout_s
         self.is_muted = False
         self.last_percent: float | None = None
@@ -425,6 +426,7 @@ class ScreenReading:
     is_playing: bool
     status_text: str
     preview_image: Image.Image | None
+    scan_ms: float = 0.0
 
 
 class ScreenTestSession:
@@ -656,6 +658,7 @@ class ScreenPercentWatcher:
                         self._stop.wait(0.5)
                         continue
 
+                    frame_t0 = time.perf_counter()
                     try:
                         shot = sct.grab(rect)
                         img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
@@ -681,6 +684,7 @@ class ScreenPercentWatcher:
                         last_x_frac=last_x_frac,
                         prefer_luma=prefer_luma,
                     )
+                    scan_ms = (time.perf_counter() - frame_t0) * 1000.0
                     should_mute, is_playing = self._debouncer.update(
                         pct,
                         threshold=threshold,
@@ -709,6 +713,7 @@ class ScreenPercentWatcher:
                             is_playing=is_playing,
                             status_text=status,
                             preview_image=preview,
+                            scan_ms=scan_ms,
                         )
                     )
                     self._stop.wait(0.015 if is_playing else 0.045)

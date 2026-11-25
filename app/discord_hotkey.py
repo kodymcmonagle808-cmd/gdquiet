@@ -4,13 +4,28 @@ import ctypes
 import threading
 import time
 from ctypes import wintypes
-from typing import Any
+from typing import Any, Callable
 
-user32 = ctypes.windll.user32
+user32 = ctypes.WinDLL("user32", use_last_error=True)
+kernel32 = ctypes.windll.kernel32
 
 INPUT_KEYBOARD = 1
 KEYEVENTF_EXTENDEDKEY = 0x0001
 KEYEVENTF_KEYUP = 0x0002
+
+MOD_ALT = 0x0001
+MOD_CONTROL = 0x0002
+MOD_SHIFT = 0x0004
+MOD_NOREPEAT = 0x4000
+WM_HOTKEY = 0x0312
+WM_QUIT = 0x0012
+ERROR_HOTKEY_ALREADY_REGISTERED = 1409
+
+HOTKEY_MOD_FLAGS = {
+    "alt": MOD_ALT,
+    "ctrl": MOD_CONTROL,
+    "shift": MOD_SHIFT,
+}
 
 MODIFIER_VKS = {
     "ctrl": 0x11,   # VK_CONTROL
@@ -205,32 +220,130 @@ def parse_tk_hotkey(event: Any) -> dict[str, Any] | None:
 class DiscordDeafenController:
     """Tracks whether GDQuiet deafened Discord so unmute restores the prior state."""
 
-    def __init__(self) -> None:
+    def __init__(self, toggle_cooldown_s: float = 0.18) -> None:
         self._lock = threading.Lock()
         self._deafened_by_us = False
+        self._toggle_cooldown_s = float(toggle_cooldown_s)
+        self._last_toggle_at = 0.0
 
     @property
     def deafened_by_us(self) -> bool:
         with self._lock:
             return self._deafened_by_us
 
+    def _send_with_cooldown(self, hotkey: dict[str, Any]) -> bool:
+        if self._last_toggle_at > 0.0 and self._toggle_cooldown_s > 0.0:
+            remaining = self._toggle_cooldown_s - (time.monotonic() - self._last_toggle_at)
+            if remaining > 0.0:
+                time.sleep(remaining)
+        sent = send_hotkey(hotkey)
+        if sent:
+            self._last_toggle_at = time.monotonic()
+        return sent
+
     def set_deafened(self, want_deaf: bool, hotkey: dict[str, Any] | None, enabled: bool) -> None:
         with self._lock:
             if not enabled or not hotkey:
                 if self._deafened_by_us and hotkey:
-                    send_hotkey(hotkey)
+                    self._send_with_cooldown(hotkey)
                     self._deafened_by_us = False
                 return
 
             if want_deaf and not self._deafened_by_us:
-                if send_hotkey(hotkey):
+                if self._send_with_cooldown(hotkey):
                     self._deafened_by_us = True
             elif not want_deaf and self._deafened_by_us:
-                if send_hotkey(hotkey):
+                if self._send_with_cooldown(hotkey):
                     self._deafened_by_us = False
 
     def restore(self, hotkey: dict[str, Any] | None) -> None:
         with self._lock:
             if self._deafened_by_us and hotkey:
-                send_hotkey(hotkey)
+                self._send_with_cooldown(hotkey)
             self._deafened_by_us = False
+
+
+class GlobalHotkeyWatcher:
+    """Listens globally via Win32 RegisterHotKey so a keybind works while GD is focused."""
+
+    HOTKEY_ID = 1
+
+    def __init__(self, on_trigger: Callable[[], None]) -> None:
+        self._on_trigger = on_trigger
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._thread_id: int = 0
+        self._stop_requested = False
+
+    def set_hotkey(self, hotkey: dict[str, Any] | None) -> tuple[bool, str]:
+        """Register a new global hotkey, returning (active, status_message)."""
+        with self._lock:
+            self._stop_locked()
+            if not hotkey or "vk" not in hotkey:
+                return False, "Inactive"
+
+            vk = int(hotkey["vk"])
+            mods = MOD_NOREPEAT
+            for name in hotkey.get("modifiers", []):
+                mods |= HOTKEY_MOD_FLAGS.get(name, 0)
+
+            ready = threading.Event()
+            result: dict[str, Any] = {"ok": False, "msg": "Inactive"}
+            self._stop_requested = False
+
+            def worker() -> None:
+                tid = int(kernel32.GetCurrentThreadId())
+                self._thread_id = tid
+                msg = wintypes.MSG()
+                # Ensure the thread has a message queue before RegisterHotKey or PostThreadMessageW.
+                user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 0)
+
+                ctypes.set_last_error(0)
+                if not user32.RegisterHotKey(None, self.HOTKEY_ID, mods, vk):
+                    err = ctypes.get_last_error()
+                    if err == ERROR_HOTKEY_ALREADY_REGISTERED:
+                        result["msg"] = "In use by another app"
+                    else:
+                        result["msg"] = f"Unavailable (err {err})"
+                    ready.set()
+                    return
+
+                result["ok"] = True
+                result["msg"] = "Active (Global)"
+                ready.set()
+
+                try:
+                    while not self._stop_requested:
+                        ret = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
+                        if ret <= 0:
+                            break
+                        if msg.message == WM_HOTKEY and msg.wParam == self.HOTKEY_ID:
+                            try:
+                                self._on_trigger()
+                            except Exception:
+                                pass
+                finally:
+                    user32.UnregisterHotKey(None, self.HOTKEY_ID)
+
+            t = threading.Thread(target=worker, daemon=True)
+            self._thread = t
+            t.start()
+            ready.wait(timeout=1.0)
+            if not result["ok"]:
+                t.join(timeout=0.3)
+                self._thread = None
+                self._thread_id = 0
+            return bool(result["ok"]), str(result["msg"])
+
+    def _stop_locked(self) -> None:
+        self._stop_requested = True
+        if self._thread_id:
+            user32.PostThreadMessageW(self._thread_id, WM_QUIT, 0, 0)
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(timeout=0.5)
+        self._thread = None
+        self._thread_id = 0
+
+    def stop(self) -> None:
+        with self._lock:
+            self._stop_locked()

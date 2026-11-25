@@ -7,6 +7,7 @@ Standalone Windows app (`GDQuiet.exe`) that reads your level percentage directly
 - **No Geode Mod Needed:** Reads the percentage text directly from the top 10% of `GeometryDash.exe` (or drag your own box with **Pick Screen Region**).
 - **Per-Window Mute Menu:** Pick exactly which open windows or audio apps get muted past your chosen percent, leaving manually muted apps untouched.
 - **Discord Auto-Deafen:** Record your Discord **Toggle Deafen** hotkey so Discord automatically deafens above your threshold and undeafens on death, exit, or 100%.
+- **Global % Checks Toggle Keybind:** Bind a global Windows keybind on **Overview** to pause or resume `%` watching and audio muting anytime, even while Geometry Dash is focused.
 
 ## Usage
 
@@ -15,5 +16,6 @@ Standalone Windows app (`GDQuiet.exe`) that reads your level percentage directly
 3. In `GDQuiet.exe`:
    - Check the open windows/apps you want muted.
    - Set **Mute at %** (default `50%`).
+   - *(Optional)* Set **Toggle % Checks Hotkey** to turn `%` watching on or off mid-session with one keybind.
    - *(Optional)* Click **Pick Screen Region** if your percentage is placed somewhere other than the top-center of GD.
-   - *(Optional)* Enable **Auto-Deafen Discord** and record your Discord Toggle Deafen keybind.
+   - *(Optional)* Enable **Auto-Deafen Discord** and follow the built-in setup tutorial.

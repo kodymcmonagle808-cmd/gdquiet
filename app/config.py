@@ -21,6 +21,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "selected_apps": [],
     "auto_deafen": False,
     "deafen_hotkey": None,
+    "watch_toggle_hotkey": None,
     "mute_at_percent": 50.0,
     "show_background_audio": False,
     "watch_enabled": True,
