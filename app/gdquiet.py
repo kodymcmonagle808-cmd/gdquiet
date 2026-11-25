@@ -1012,7 +1012,7 @@ class GDQuietApp:
             fg="#082f49",
             hover_bg="#7dd3fc",
         ).pack(side="left", padx=(0, 10))
-        self._make_button(row2, "Reset to Auto Top-Center", self._reset_auto_region).pack(side="left", padx=(0, 12))
+        self._make_button(row2, "Reset to Auto Top 10%", self._reset_auto_region).pack(side="left", padx=(0, 12))
         self.region_mode_label = tk.Label(
             row2,
             text=self._describe_region_mode(),
@@ -1258,7 +1258,7 @@ class GDQuietApp:
                 return "Custom box (locked to window)"
             if reg.get("kind") == "screen":
                 return f"Custom screen ({reg.get('width')}x{reg.get('height')})"
-        return "Auto top-center"
+        return "Auto top 10%"
 
     def _toggle_watching(self) -> None:
         new_val = not bool(self.cfg.get("watch_enabled", True))

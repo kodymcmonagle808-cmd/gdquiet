@@ -158,11 +158,11 @@ def compute_capture_rect(
         return None, f"Waiting for {proc} window..."
 
     wx, wy, ww, wh = rect
-    # Top-center HUD strip covers both centered percentage and percentage beside the progress bar.
-    left = wx + int(ww * 0.22)
-    top = wy + int(wh * 0.005)
-    width = max(80, int(ww * 0.56))
-    height = max(36, int(wh * 0.14))
+    # Scan only the top 10% of the game window.
+    left = wx
+    top = wy
+    width = max(80, ww)
+    height = max(24, int(wh * 0.10))
     return {"left": left, "top": top, "width": width, "height": height}, proc
 
 

@@ -4,7 +4,7 @@ Standalone Windows app (`GDQuiet.exe`) that reads your level percentage directly
 
 ## Features
 
-- **No Geode Mod Needed:** Reads the percentage text directly from `GeometryDash.exe` (auto top-center crop, or drag your own box with **Pick Screen Region**).
+- **No Geode Mod Needed:** Reads the percentage text directly from the top 10% of `GeometryDash.exe` (or drag your own box with **Pick Screen Region**).
 - **Per-Window Mute Menu:** Pick exactly which open windows or audio apps get muted past your chosen percent, leaving manually muted apps untouched.
 - **Discord Auto-Deafen:** Record your Discord **Toggle Deafen** hotkey so Discord automatically deafens above your threshold and undeafens on death, exit, or 100%.
 - **Discord Login via Supabase:** Sign in with Discord inside `GDQuiet.exe` to generate your GD Quiet Account Number and save your threshold/live status.
