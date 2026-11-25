@@ -803,11 +803,11 @@ class GDQuietApp:
             bg=COLORS["bg"],
             fg=COLORS["subtext"],
             font=("Segoe UI", 9),
-        ).pack(anchor="w", pady=(2, 14))
+        ).pack(anchor="w", pady=(2, 12))
 
-        # Auto-Deafen Hotkey Card
-        deaf_card = self._make_card(page)
-        deaf_card.pack(fill="x")
+        # Card 1: Hotkey Setup Controls
+        deaf_card = self._make_card(page, pady=12)
+        deaf_card.pack(fill="x", pady=(0, 12))
 
         tk.Label(
             deaf_card,
@@ -818,13 +818,13 @@ class GDQuietApp:
         ).pack(anchor="w")
         tk.Label(
             deaf_card,
-            text="Set a keybind here and match it in Discord so GD Quiet can deafen and undeafen automatically.",
+            text="Set a keybind here and match it to Discord → Keybinds → Toggle Deafen.",
             bg=COLORS["card"],
             fg=COLORS["subtext"],
             font=("Segoe UI", 9),
             wraplength=600,
             justify="left",
-        ).pack(anchor="w", pady=(2, 10))
+        ).pack(anchor="w", pady=(2, 8))
 
         self.auto_deafen_var = tk.BooleanVar(value=bool(self.cfg.get("auto_deafen", False)))
         tk.Checkbutton(
@@ -838,7 +838,7 @@ class GDQuietApp:
             activebackground=COLORS["card"],
             activeforeground=COLORS["text"],
             font=("Segoe UI", 10, "bold"),
-        ).pack(anchor="w", pady=(0, 10))
+        ).pack(anchor="w", pady=(0, 8))
 
         hk_row = tk.Frame(deaf_card, bg=COLORS["card"])
         hk_row.pack(fill="x")
@@ -869,13 +869,186 @@ class GDQuietApp:
         self._make_button(hk_row, "Test Hotkey", self._test_hotkey).pack(side="left", padx=(0, 8))
         self._make_button(hk_row, "Clear", self._clear_hotkey).pack(side="left")
 
+        # Card 2: Interactive Discord Deafen Setup Tutorial
+        guide_card = self._make_card(page, pady=12)
+        guide_card.pack(fill="both", expand=True)
+
+        guide_hdr = tk.Frame(guide_card, bg=COLORS["card"])
+        guide_hdr.pack(fill="x", pady=(0, 8))
+
         tk.Label(
-            deaf_card,
-            text="Tip: Set the same keybind in Discord → User Settings → Keybinds → Toggle Deafen (avoid Jump/Pause keys).",
+            guide_hdr,
+            text="How to Set Up Discord Auto-Deafen",
             bg=COLORS["card"],
-            fg=COLORS["subtext"],
-            font=("Segoe UI", 8),
-        ).pack(anchor="w", pady=(10, 0))
+            fg=COLORS["text"],
+            font=("Segoe UI", 12, "bold"),
+        ).pack(side="left")
+
+        tab_box = tk.Frame(guide_hdr, bg=COLORS["card"])
+        tab_box.pack(side="right")
+
+        self._guide_tab_btns: dict[str, tk.Button] = {}
+        for tab_key, tab_label in (("steps", "Step-by-Step Guide"), ("fixes", "Troubleshooting")):
+            btn = self._make_button(
+                tab_box,
+                tab_label,
+                lambda k=tab_key: self._show_discord_guide_tab(k),
+                padx=10,
+                pady=4,
+                font=("Segoe UI", 8, "bold"),
+            )
+            btn.pack(side="left", padx=(6, 0))
+            self._guide_tab_btns[tab_key] = btn
+
+        self.guide_steps_frame = tk.Frame(guide_card, bg=COLORS["card"])
+        self.guide_fixes_frame = tk.Frame(guide_card, bg=COLORS["card"])
+
+        steps = [
+            (
+                "1",
+                "Open Discord Keybinds",
+                "In Discord, click the Gear icon (User Settings) at the bottom-left, then open App Settings → Keybinds.",
+                None,
+            ),
+            (
+                "2",
+                "Create a 'Toggle Deafen' Keybind in Discord",
+                "Click Add a Keybind, set Action to Toggle Deafen (not Toggle Mute), click Record Keybind, and press an unused combo like Ctrl+Shift+D or F8. Avoid Space, Up, W, or Esc.",
+                None,
+            ),
+            (
+                "3",
+                "Match & Enable Here in GD Quiet",
+                "Check 'Enable Discord Auto-Deafen' above, click Record Hotkey, and press that exact same keybind.",
+                "step3",
+            ),
+            (
+                "4",
+                "Test Before Starting a Level",
+                "Join a Discord voice channel and click Test Hotkey above to confirm your headphone icon toggles Deafened on/off. Start each GD run undeafened so death/100% restores it cleanly.",
+                None,
+            ),
+        ]
+
+        self.tutorial_step3_badge: tk.Label | None = None
+        for num, title, desc, tag in steps:
+            row = tk.Frame(
+                self.guide_steps_frame,
+                bg=COLORS["card_alt"],
+                highlightthickness=1,
+                highlightbackground=COLORS["border"],
+                padx=10,
+                pady=6,
+            )
+            row.pack(fill="x", pady=(0, 6))
+
+            num_lbl = tk.Label(
+                row,
+                text=num,
+                bg=COLORS["cyan_dark"],
+                fg=COLORS["text"],
+                font=("Segoe UI", 9, "bold"),
+                width=2,
+                pady=1,
+            )
+            num_lbl.pack(side="left", anchor="n", padx=(0, 10), pady=(2, 0))
+
+            body = tk.Frame(row, bg=COLORS["card_alt"])
+            body.pack(side="left", fill="x", expand=True)
+
+            top_line = tk.Frame(body, bg=COLORS["card_alt"])
+            top_line.pack(fill="x")
+            tk.Label(
+                top_line,
+                text=title,
+                bg=COLORS["card_alt"],
+                fg=COLORS["text"],
+                font=("Segoe UI", 9, "bold"),
+            ).pack(side="left")
+
+            if tag == "step3":
+                self.tutorial_step3_badge = tk.Label(
+                    top_line,
+                    text="Needs hotkey",
+                    bg=COLORS["amber_bg"],
+                    fg=COLORS["amber"],
+                    font=("Segoe UI", 8, "bold"),
+                    padx=7,
+                    pady=1,
+                )
+                self.tutorial_step3_badge.pack(side="right")
+
+            tk.Label(
+                body,
+                text=desc,
+                bg=COLORS["card_alt"],
+                fg=COLORS["subtext"],
+                font=("Segoe UI", 8),
+                wraplength=540,
+                justify="left",
+                anchor="w",
+            ).pack(fill="x", pady=(2, 0))
+
+        fixes = [
+            (
+                "Test Hotkey does nothing in Discord",
+                "1) Make sure Discord's keybind Action is 'Toggle Deafen' (not Mute) and its toggle switch is ON. 2) Admin mismatch: if Discord runs as Administrator, run GDQuiet.exe as Administrator too. 3) Try F8 or Ctrl+Shift+F9 if another overlay steals the key.",
+            ),
+            (
+                "Discord toggles backwards (deafens when you die)",
+                "Start your level UNDEAFENED in Discord. GD Quiet only sends the toggle key when crossing your % and sends it again when you die, exit, or reach 100%. Click Test Hotkey once or uncheck Auto-Deafen to resync.",
+            ),
+            (
+                "Want to mute YouTube, Spotify, or browsers instead?",
+                "Open the 'Apps to Mute' tab and check those windows directly — GD Quiet mutes them silently via Windows audio without needing any keybinds.",
+            ),
+        ]
+
+        for title, desc in fixes:
+            box = tk.Frame(
+                self.guide_fixes_frame,
+                bg=COLORS["card_alt"],
+                highlightthickness=1,
+                highlightbackground=COLORS["border"],
+                padx=10,
+                pady=8,
+            )
+            box.pack(fill="x", pady=(0, 8))
+            tk.Label(
+                box,
+                text=title,
+                bg=COLORS["card_alt"],
+                fg=COLORS["cyan"],
+                font=("Segoe UI", 9, "bold"),
+                anchor="w",
+            ).pack(fill="x")
+            tk.Label(
+                box,
+                text=desc,
+                bg=COLORS["card_alt"],
+                fg=COLORS["subtext"],
+                font=("Segoe UI", 8),
+                wraplength=580,
+                justify="left",
+                anchor="w",
+            ).pack(fill="x", pady=(3, 0))
+
+        self._show_discord_guide_tab("steps")
+
+    def _show_discord_guide_tab(self, tab_key: str) -> None:
+        self.guide_steps_frame.pack_forget()
+        self.guide_fixes_frame.pack_forget()
+        if tab_key == "fixes":
+            self.guide_fixes_frame.pack(fill="both", expand=True)
+        else:
+            self.guide_steps_frame.pack(fill="both", expand=True)
+
+        for key, btn in self._guide_tab_btns.items():
+            bg = COLORS["accent"] if key == tab_key else COLORS["card_alt"]
+            hover = COLORS["accent_hover"] if key == tab_key else COLORS["hover"]
+            btn.configure(bg=bg)
+            btn._base_bg = bg  # type: ignore[attr-defined]
+            btn._hover_bg = hover  # type: ignore[attr-defined]
 
     def _build_capture_page(self) -> None:
         page = tk.Frame(self.main_area, bg=COLORS["bg"])
@@ -1273,6 +1446,7 @@ class GDQuietApp:
 
         effective_mute = False if testing else reading.should_mute
         if effective_mute != self.current_want_mute:
+            self.current_want_mute = effective_mute
             self._apply_mute_state(effective_mute)
 
         with self.reading_lock:
@@ -1355,6 +1529,27 @@ class GDQuietApp:
 
         reg_mode = "Custom" if self.cfg.get("watch_mode") == "custom_region" else "Auto"
         self.summary_capture_btn.configure(text=f"Capture: {reg_mode} ({proc})")
+
+        badge = getattr(self, "tutorial_step3_badge", None)
+        if badge is not None:
+            if auto_deaf and isinstance(hk, dict):
+                badge.configure(
+                    text=f"Ready ({hk.get('label', 'Set')})",
+                    bg=COLORS["green_bg"],
+                    fg=COLORS["green"],
+                )
+            elif isinstance(hk, dict):
+                badge.configure(
+                    text="Enable checkbox above",
+                    bg=COLORS["amber_bg"],
+                    fg=COLORS["amber"],
+                )
+            else:
+                badge.configure(
+                    text="Needs hotkey",
+                    bg=COLORS["amber_bg"],
+                    fg=COLORS["amber"],
+                )
 
     def _on_scale_move(self, _val: str) -> None:
         pct = float(self.percent_var.get())

@@ -128,6 +128,32 @@ class GDQuietTests(unittest.TestCase):
                 )
                 pct, _raw = ocr.read_percent(bg)
                 self.assertEqual(pct, expected)
+
+            # Blank frames should short-circuit before hitting OCR
+            blank = Image.new("RGB", (1920, 108), (20, 40, 80))
+            self.assertEqual(screen_reader._prepare_ocr_gray(blank, luma_fallback=False), (None, None))
+
+            # Wide 1080p top-10% strip (center, far-left, and colored HUD) + watcher ROI tracking
+            watcher = screen_reader.ScreenPercentWatcher(lambda: {}, lambda _r: None)
+            wide_cases = [
+                ((920, 16), "54.32%", (255, 255, 255), 54.32),
+                ((40, 16), "19%", (255, 255, 255), 19.0),
+                ((920, 16), "61.50%", (255, 240, 90), 61.5),
+            ]
+            x_frac = None
+            prefer_luma = False
+            for pos, label, color, expected in wide_cases:
+                strip = Image.new("RGB", (1920, 108), (30, 110, 200))
+                d = ImageDraw.Draw(strip)
+                d.text(pos, label, font=font, fill=color, stroke_width=2, stroke_fill=(0, 0, 0))
+                pct, _txt, x_frac, prefer_luma = watcher._scan_image(
+                    ocr,
+                    strip,
+                    auto_roi=True,
+                    last_x_frac=x_frac,
+                    prefer_luma=prefer_luma,
+                )
+                self.assertEqual(pct, expected)
         finally:
             ocr.close()
 
@@ -217,6 +243,14 @@ class GDQuietTests(unittest.TestCase):
                 self.assertTrue(hasattr(app, "record_hk_btn"))
                 for page_key in ("apps", "discord", "capture", "dashboard"):
                     app._show_page(page_key)
+                app._show_discord_guide_tab("fixes")
+                app._show_discord_guide_tab("steps")
+                self.assertEqual(app.tutorial_step3_badge.cget("text"), "Needs hotkey")
+                with app.cfg_lock:
+                    app.cfg["auto_deafen"] = True
+                    app.cfg["deafen_hotkey"] = {"modifiers": ["ctrl", "shift"], "vk": ord("D"), "label": "Ctrl + Shift + D"}
+                app._update_sidebar_badges()
+                self.assertEqual(app.tutorial_step3_badge.cget("text"), "Ready (Ctrl + Shift + D)")
                 app._toggle_watching()
                 app._toggle_watching()
                 app._save_mute_percent()

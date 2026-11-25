@@ -35,8 +35,13 @@ WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
 # Maps white-ish HUD score (0..255) to dark ink (0..255, inverted for OCR).
 _WHITE_LUT = [255 if v < 110 else max(0, 255 - int((v - 110) * 2.2)) for v in range(256)]
 _LUMA_LUT = [255 if v < 165 else max(0, 255 - int((v - 165) * 2.8)) for v in range(256)]
+_DARK_INK_MASK = [255 if v < 245 else 0 for v in range(256)]
 
 _PERCENT_RE = re.compile(r"(\d{1,3}(?:[.,]\d{1,2})?)\s*%")
+
+_WINDOW_CACHE_LOCK = threading.Lock()
+_WINDOW_CACHE: dict[str, tuple[int, float]] = {}
+_WINDOW_CACHE_TTL_S = 2.0
 
 
 class POINT(ctypes.Structure):
@@ -73,10 +78,56 @@ def _is_cloaked(hwnd: int) -> bool:
     return res == 0 and cloaked.value != 0
 
 
+def clear_window_cache() -> None:
+    with _WINDOW_CACHE_LOCK:
+        _WINDOW_CACHE.clear()
+
+
+def _get_window_client_rect(hwnd: int) -> tuple[int, int, int, int] | None:
+    if not hwnd or not user32.IsWindow(hwnd) or not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd):
+        return None
+    if _is_cloaked(hwnd):
+        return None
+
+    cr = RECT()
+    if not user32.GetClientRect(hwnd, ctypes.byref(cr)):
+        return None
+    w = int(cr.right - cr.left)
+    h = int(cr.bottom - cr.top)
+    if w < 120 or h < 120:
+        return None
+
+    pt = POINT(0, 0)
+    if not user32.ClientToScreen(hwnd, ctypes.byref(pt)):
+        return None
+    return (int(pt.x), int(pt.y), w, h)
+
+
+def _window_belongs_to_process(hwnd: int, target_lower: str) -> bool:
+    pid = wintypes.DWORD(0)
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    if not pid.value:
+        return False
+    try:
+        return psutil.Process(int(pid.value)).name().lower() == target_lower
+    except Exception:
+        return False
+
+
 def find_window_client_rect(process_name: str) -> tuple[int, int, int, int] | None:
     target = (process_name or "").strip().lower()
     if not target:
         return None
+
+    now = time.monotonic()
+    with _WINDOW_CACHE_LOCK:
+        cached = _WINDOW_CACHE.get(target)
+    if cached is not None:
+        cached_hwnd, cached_at = cached
+        if (now - cached_at) < _WINDOW_CACHE_TTL_S and _window_belongs_to_process(cached_hwnd, target):
+            rect = _get_window_client_rect(cached_hwnd)
+            if rect is not None:
+                return rect
 
     matching_pids: set[int] = set()
     for proc in psutil.process_iter(["pid", "name"]):
@@ -87,41 +138,38 @@ def find_window_client_rect(process_name: str) -> tuple[int, int, int, int] | No
             continue
 
     if not matching_pids:
+        with _WINDOW_CACHE_LOCK:
+            _WINDOW_CACHE.pop(target, None)
         return None
 
     best_rect: tuple[int, int, int, int] | None = None
+    best_hwnd = 0
     best_area = 0
 
     def callback(hwnd: int, _lparam: int) -> bool:
-        nonlocal best_rect, best_area
-        if not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd):
-            return True
-        if _is_cloaked(hwnd):
-            return True
+        nonlocal best_rect, best_hwnd, best_area
         pid = wintypes.DWORD(0)
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
         if int(pid.value) not in matching_pids:
             return True
 
-        cr = RECT()
-        if not user32.GetClientRect(hwnd, ctypes.byref(cr)):
-            return True
-        w = int(cr.right - cr.left)
-        h = int(cr.bottom - cr.top)
-        if w < 120 or h < 120:
+        rect = _get_window_client_rect(hwnd)
+        if rect is None:
             return True
 
-        pt = POINT(0, 0)
-        if not user32.ClientToScreen(hwnd, ctypes.byref(pt)):
-            return True
-
-        area = w * h
+        area = rect[2] * rect[3]
         if area > best_area:
             best_area = area
-            best_rect = (int(pt.x), int(pt.y), w, h)
+            best_hwnd = hwnd
+            best_rect = rect
         return True
 
     user32.EnumWindows(WNDENUMPROC(callback), 0)
+    with _WINDOW_CACHE_LOCK:
+        if best_hwnd:
+            _WINDOW_CACHE[target] = (best_hwnd, time.monotonic())
+        else:
+            _WINDOW_CACHE.pop(target, None)
     return best_rect
 
 
@@ -166,21 +214,43 @@ def compute_capture_rect(
     return {"left": left, "top": top, "width": width, "height": height}, proc
 
 
-def preprocess_for_ocr(img: Image.Image, luma_fallback: bool = False) -> Image.Image:
-    rgb = img.convert("RGB")
+def _extract_ink(img: Image.Image, luma_fallback: bool = False) -> Image.Image:
+    rgb = img if img.mode == "RGB" else img.convert("RGB")
     if luma_fallback:
-        ink = rgb.convert("L").point(_LUMA_LUT)
-    else:
-        r, g, b = rgb.split()
-        mn = ImageChops.darker(ImageChops.darker(r, g), b)
-        mx = ImageChops.lighter(ImageChops.lighter(r, g), b)
-        sat = ImageChops.subtract(mx, mn)
-        ink = ImageChops.subtract(mn, sat).point(_WHITE_LUT)
+        return rgb.convert("L").point(_LUMA_LUT)
+    r, g, b = rgb.split()
+    mn = ImageChops.darker(ImageChops.darker(r, g), b)
+    mx = ImageChops.lighter(ImageChops.lighter(r, g), b)
+    sat = ImageChops.subtract(mx, mn)
+    return ImageChops.subtract(mn, sat).point(_WHITE_LUT)
 
-    scale = 3 if rgb.height < 80 else (2 if rgb.height < 150 else 1)
+
+def _prepare_ocr_gray(
+    img: Image.Image,
+    luma_fallback: bool = False,
+) -> tuple[Image.Image | None, tuple[int, int, int, int] | None]:
+    """Extract high-contrast ink crop padded for WinRT OCR, skipping blank frames."""
+    ink = _extract_ink(img, luma_fallback=luma_fallback)
+    if ink.getextrema()[0] >= 245:
+        return None, None
+    bbox = ink.point(_DARK_INK_MASK).getbbox()
+    if bbox is None:
+        return None, None
+
+    x0, y0, x1, y1 = bbox
+    # Pad around the foreground ink so short strings like "8%" keep line context.
+    cropped = ink.crop((max(0, x0 - 40), max(0, y0 - 20), min(ink.width, x1 + 40), min(ink.height, y1 + 20)))
+    scale = 3 if cropped.height < 80 else (2 if cropped.height < 150 else 1)
     if scale > 1:
-        ink = ink.resize((ink.width * scale, ink.height * scale), Image.Resampling.LANCZOS)
-    return ImageOps.expand(ink, border=24, fill=255).convert("RGBA")
+        cropped = cropped.resize((cropped.width * scale, cropped.height * scale), Image.Resampling.BILINEAR)
+    return ImageOps.expand(cropped, border=24, fill=255), bbox
+
+
+def preprocess_for_ocr(img: Image.Image, luma_fallback: bool = False) -> Image.Image:
+    gray, _bbox = _prepare_ocr_gray(img, luma_fallback=luma_fallback)
+    if gray is None:
+        return Image.new("RGBA", (64, 64), (255, 255, 255, 255))
+    return gray.convert("RGBA")
 
 
 def parse_percent_from_text(text: str, last_percent: float | None = None) -> float | None:
@@ -222,9 +292,27 @@ class WinRtPercentOcr:
     def available(self) -> bool:
         return self._engine is not None
 
+    def recognize_gray(self, gray_img: Image.Image) -> str:
+        if self._engine is None:
+            return ""
+        img = gray_img if gray_img.mode == "L" else gray_img.convert("L")
+        dw = wss.DataWriter()
+        dw.write_bytes(img.tobytes())
+        ibuf = dw.detach_buffer()
+        sb = wgi.SoftwareBitmap.create_copy_from_buffer(
+            ibuf,
+            wgi.BitmapPixelFormat.GRAY8,
+            img.width,
+            img.height,
+        )
+        res = self._loop.run_until_complete(self._engine.recognize_async(sb))
+        return str(getattr(res, "text", "") or "").strip()
+
     def recognize_text(self, rgba_img: Image.Image) -> str:
         if self._engine is None:
             return ""
+        if rgba_img.mode == "L":
+            return self.recognize_gray(rgba_img)
         img = rgba_img if rgba_img.mode == "RGBA" else rgba_img.convert("RGBA")
         dw = wss.DataWriter()
         dw.write_bytes(img.tobytes())
@@ -238,23 +326,32 @@ class WinRtPercentOcr:
         res = self._loop.run_until_complete(self._engine.recognize_async(sb))
         return str(getattr(res, "text", "") or "").strip()
 
+    def read_percent_with_meta(
+        self,
+        captured: Image.Image,
+        last_percent: float | None = None,
+        prefer_luma: bool = False,
+    ) -> tuple[float | None, str, tuple[int, int, int, int] | None, bool]:
+        first_text = ""
+        for use_luma in (prefer_luma, not prefer_luma):
+            gray, bbox = _prepare_ocr_gray(captured, luma_fallback=use_luma)
+            if gray is None:
+                continue
+            text = self.recognize_gray(gray)
+            if not first_text and text:
+                first_text = text
+            pct = parse_percent_from_text(text, last_percent=last_percent)
+            if pct is not None:
+                return pct, text, bbox, use_luma
+        return None, first_text, None, prefer_luma
+
     def read_percent(
         self,
         captured: Image.Image,
         last_percent: float | None = None,
     ) -> tuple[float | None, str]:
-        primary = preprocess_for_ocr(captured, luma_fallback=False)
-        text = self.recognize_text(primary)
-        pct = parse_percent_from_text(text, last_percent=last_percent)
-        if pct is not None:
-            return pct, text
-
-        fallback = preprocess_for_ocr(captured, luma_fallback=True)
-        fb_text = self.recognize_text(fallback)
-        fb_pct = parse_percent_from_text(fb_text, last_percent=last_percent)
-        if fb_pct is not None:
-            return fb_pct, fb_text
-        return None, text or fb_text
+        pct, text, _bbox, _used_luma = self.read_percent_with_meta(captured, last_percent=last_percent)
+        return pct, text
 
     def close(self) -> None:
         try:
@@ -448,18 +545,66 @@ class ScreenPercentWatcher:
     def stop(self) -> None:
         self._stop.set()
 
+    def _scan_image(
+        self,
+        ocr: WinRtPercentOcr,
+        img: Image.Image,
+        *,
+        auto_roi: bool,
+        last_x_frac: float | None,
+        prefer_luma: bool,
+    ) -> tuple[float | None, str, float | None, bool]:
+        last_pct = self._debouncer.last_percent
+        if auto_roi and img.width >= 700:
+            band_w = max(420, int(img.width * 0.42))
+            center_frac = 0.50 if last_x_frac is None else last_x_frac
+            x0 = max(0, min(img.width - band_w, int(center_frac * img.width) - (band_w // 2)))
+            x1 = min(img.width, x0 + band_w)
+            roi = img.crop((x0, 0, x1, img.height))
+            pct, raw_text, bbox, used_luma = ocr.read_percent_with_meta(
+                roi,
+                last_percent=last_pct,
+                prefer_luma=prefer_luma,
+            )
+            if pct is not None and bbox is not None:
+                hit_frac = (x0 + (bbox[0] + bbox[2]) * 0.5) / img.width
+                return pct, raw_text, hit_frac, used_luma
+            if x0 == 0 and x1 == img.width:
+                return None, raw_text, last_x_frac, prefer_luma
+
+        pct, raw_text, bbox, used_luma = ocr.read_percent_with_meta(
+            img,
+            last_percent=last_pct,
+            prefer_luma=prefer_luma,
+        )
+        if pct is not None and bbox is not None:
+            hit_frac = ((bbox[0] + bbox[2]) * 0.5) / max(1, img.width)
+            return pct, raw_text, hit_frac, used_luma
+        return None, raw_text, last_x_frac, prefer_luma
+
     def _run(self) -> None:
         ocr = WinRtPercentOcr()
         try:
-            with mss.mss() as sct:
+            with mss.MSS() as sct:
                 last_preview_at = 0.0
+                last_x_frac: float | None = None
+                prefer_luma = False
+                last_target_key: tuple[str, str] | None = None
+
                 while not self._stop.is_set():
                     cfg = self._get_settings()
                     enabled = bool(cfg.get("watch_enabled", True))
                     threshold = float(cfg.get("mute_at_percent", 50.0))
                     unmute_100 = bool(cfg.get("unmute_at_100", True))
+                    watch_mode = str(cfg.get("watch_mode") or "auto_window")
+                    target_process = str(cfg.get("target_process") or "geometrydash.exe")
+                    target_key = (watch_mode, target_process)
+                    if target_key != last_target_key:
+                        last_target_key = target_key
+                        last_x_frac = None
 
                     if not enabled:
+                        last_x_frac = None
                         self._debouncer.reset()
                         self._on_reading(
                             ScreenReading(
@@ -490,12 +635,13 @@ class ScreenPercentWatcher:
                         continue
 
                     rect, source_label = compute_capture_rect(
-                        watch_mode=str(cfg.get("watch_mode") or "auto_window"),
-                        target_process=str(cfg.get("target_process") or "geometrydash.exe"),
+                        watch_mode=watch_mode,
+                        target_process=target_process,
                         custom_region=cfg.get("custom_region"),
                     )
 
                     if rect is None:
+                        last_x_frac = None
                         self._debouncer.reset()
                         self._on_reading(
                             ScreenReading(
@@ -528,7 +674,13 @@ class ScreenPercentWatcher:
                         self._stop.wait(0.5)
                         continue
 
-                    pct, raw_text = ocr.read_percent(img, last_percent=self._debouncer.last_percent)
+                    pct, raw_text, last_x_frac, prefer_luma = self._scan_image(
+                        ocr,
+                        img,
+                        auto_roi=(watch_mode != "custom_region"),
+                        last_x_frac=last_x_frac,
+                        prefer_luma=prefer_luma,
+                    )
                     should_mute, is_playing = self._debouncer.update(
                         pct,
                         threshold=threshold,
@@ -559,6 +711,6 @@ class ScreenPercentWatcher:
                             preview_image=preview,
                         )
                     )
-                    self._stop.wait(0.10)
+                    self._stop.wait(0.015 if is_playing else 0.045)
         finally:
             ocr.close()
