@@ -38,6 +38,20 @@ _LUMA_LUT = [255 if v < 165 else max(0, 255 - int((v - 165) * 2.8)) for v in ran
 _DARK_INK_MASK = [255 if v < 245 else 0 for v in range(256)]
 
 _PERCENT_RE = re.compile(r"(\d{1,3}(?:[.,]\d{1,2})?)\s*%")
+_PAUSE_MENU_MARKER_RE = re.compile(r"\b(?:resume|restart|practice|normal mode|attempts?)\b", re.IGNORECASE)
+_LEVEL_MENU_LABELS = {
+    "attempt",
+    "attempts",
+    "best",
+    "exit",
+    "level complete",
+    "normal mode",
+    "paused",
+    "practice",
+    "resume",
+    "restart",
+    "settings",
+}
 
 _WINDOW_CACHE_LOCK = threading.Lock()
 _WINDOW_CACHE: dict[str, tuple[int, float]] = {}
@@ -285,6 +299,67 @@ def parse_percent_from_text(text: str, last_percent: float | None = None) -> flo
     return min(candidates, key=lambda c: abs(c - last_percent))
 
 
+def normalize_level_name(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (name or "").casefold())
+
+
+def extract_level_name_from_pause_text(text: str) -> str | None:
+    lines = [re.sub(r"\s+", " ", line).strip(" \t|:•-") for line in (text or "").splitlines()]
+    if not any(_PAUSE_MENU_MARKER_RE.search(line) for line in lines):
+        return None
+
+    for line in lines:
+        candidate = re.sub(r"^level(?:\s+name)?\s*[:\-]\s*", "", line, flags=re.IGNORECASE).strip()
+        normalized = normalize_level_name(candidate)
+        if (
+            len(candidate) > 48
+            or len(normalized) < 3
+            or "%" in candidate
+            or normalized in {normalize_level_name(label) for label in _LEVEL_MENU_LABELS}
+            or re.search(r"\b(?:attempts?|normal mode|practice|resume|restart)\b", candidate, re.IGNORECASE)
+        ):
+            continue
+        if re.search(r"[A-Za-z]", candidate):
+            return candidate
+    return None
+
+
+class LevelNameTracker:
+    """Emits a pause-menu level title only after two matching OCR scans."""
+
+    def __init__(self) -> None:
+        self._candidate_key = ""
+        self._candidate_text = ""
+        self._candidate_count = 0
+        self._reported_key = ""
+
+    def reset(self) -> None:
+        self._candidate_key = ""
+        self._candidate_text = ""
+        self._candidate_count = 0
+        self._reported_key = ""
+
+    def update(self, candidate: str | None) -> str | None:
+        key = normalize_level_name(candidate or "")
+        if not key:
+            self.reset()
+            return None
+
+        if key == self._candidate_key:
+            self._candidate_count += 1
+            self._candidate_text = candidate or self._candidate_text
+        else:
+            self._candidate_key = key
+            self._candidate_text = candidate or ""
+            self._candidate_count = 1
+            self._reported_key = ""
+
+        if self._candidate_count >= 2 and self._reported_key != key:
+            self._reported_key = key
+            return self._candidate_text
+        return None
+
+
 class WinRtPercentOcr:
     """Thread-affine Windows.Media.Ocr recognizer for fast in-memory crops."""
 
@@ -437,6 +512,8 @@ class ScreenReading:
     status_text: str
     preview_image: Image.Image | None
     scan_ms: float = 0.0
+    level_name_candidate: str | None = None
+    level_detection_error: str | None = None
 
 
 class ScreenTestSession:
@@ -546,6 +623,7 @@ class ScreenPercentWatcher:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._debouncer = PercentStateDebouncer()
+        self._level_name_tracker = LevelNameTracker()
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -594,11 +672,23 @@ class ScreenPercentWatcher:
             return pct, raw_text, hit_frac, used_luma
         return None, raw_text, last_x_frac, prefer_luma
 
+    @staticmethod
+    def _scan_level_name(sct: Any, ocr: WinRtPercentOcr, process_name: str) -> str | None:
+        rect = find_window_client_rect(process_name)
+        if rect is None:
+            return None
+        x, y, width, height = rect
+        shot = sct.grab({"left": x, "top": y, "width": width, "height": height})
+        img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+        text = ocr.recognize_text(img.convert("RGBA"))
+        return extract_level_name_from_pause_text(text)
+
     def _run(self) -> None:
         ocr = WinRtPercentOcr()
         try:
             with mss.MSS() as sct:
                 last_preview_at = 0.0
+                last_level_scan_at = 0.0
                 last_x_frac: float | None = None
                 prefer_luma = False
                 last_target_key: tuple[str, str] | None = None
@@ -624,6 +714,7 @@ class ScreenPercentWatcher:
                     if not enabled:
                         last_x_frac = None
                         self._debouncer.reset()
+                        self._level_name_tracker.reset()
                         self._on_reading(
                             ScreenReading(
                                 percent=None,
@@ -639,6 +730,7 @@ class ScreenPercentWatcher:
 
                     if not ocr.available():
                         self._debouncer.reset()
+                        self._level_name_tracker.reset()
                         self._on_reading(
                             ScreenReading(
                                 percent=None,
@@ -661,6 +753,7 @@ class ScreenPercentWatcher:
                     if rect is None:
                         last_x_frac = None
                         self._debouncer.reset()
+                        self._level_name_tracker.reset()
                         self._on_reading(
                             ScreenReading(
                                 percent=None,
@@ -708,6 +801,29 @@ class ScreenPercentWatcher:
                     )
 
                     now = time.monotonic()
+                    level_name_candidate: str | None = None
+                    level_detection_error: str | None = None
+                    if cfg.get("level_detection_beta", False):
+                        if now - last_level_scan_at >= 1.0:
+                            last_level_scan_at = now
+                            level_process = target_process
+                            region = cfg.get("custom_region")
+                            if (
+                                watch_mode == "custom_region"
+                                and isinstance(region, dict)
+                                and region.get("kind") == "window_rel"
+                            ):
+                                level_process = str(region.get("process") or target_process)
+                            try:
+                                title = self._scan_level_name(sct, ocr, level_process)
+                            except Exception as exc:
+                                self._level_name_tracker.reset()
+                                level_detection_error = str(exc)
+                            else:
+                                level_name_candidate = self._level_name_tracker.update(title)
+                    else:
+                        self._level_name_tracker.reset()
+
                     preview: Image.Image | None = None
                     if (now - last_preview_at) >= preview_interval_s:
                         last_preview_at = now
@@ -731,6 +847,8 @@ class ScreenPercentWatcher:
                             status_text=status,
                             preview_image=preview,
                             scan_ms=scan_ms,
+                            level_name_candidate=level_name_candidate,
+                            level_detection_error=level_detection_error,
                         )
                     )
                     self._stop.wait(play_wait_s if is_playing else idle_wait_s)

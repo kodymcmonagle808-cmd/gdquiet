@@ -90,6 +90,47 @@ class GDQuietTests(unittest.TestCase):
         self.assertNotIn("supabase_url", config.DEFAULT_CONFIG)
         self.assertNotIn("supabase_anon_key", config.DEFAULT_CONFIG)
         self.assertNotIn("session", config.DEFAULT_CONFIG)
+        self.assertFalse(config.DEFAULT_CONFIG["level_detection_beta"])
+        self.assertEqual(config.DEFAULT_CONFIG["level_name_corrections"], {})
+
+    def test_level_name_correction_is_saved_and_reused_locally(self) -> None:
+        import threading
+        import gdquiet
+
+        class FakeWidget:
+            def __init__(self) -> None:
+                self.options: dict[str, object] = {}
+
+            def configure(self, **kwargs: object) -> None:
+                self.options.update(kwargs)
+
+            def pack(self, **_kwargs: object) -> None:
+                pass
+
+            def pack_forget(self) -> None:
+                pass
+
+        app = gdquiet.GDQuietApp.__new__(gdquiet.GDQuietApp)
+        app.cfg_lock = threading.RLock()
+        app.cfg = {"level_detection_beta": True, "level_name_corrections": {}}
+        app._pending_level_raw = "mis-read!"
+        app._pending_level_display = "mis-read!"
+        app._closing = False
+        app._save_cfg = lambda: None
+        app.level_detection_status_lbl = FakeWidget()
+        app.level_detection_prompt_label = FakeWidget()
+        app.level_detection_prompt = FakeWidget()
+        app.level_correction_row = FakeWidget()
+
+        app._save_level_detection_feedback("Correct Name")
+        self.assertEqual(app.cfg["level_name_corrections"], {"misread": "Correct Name"})
+
+        app._show_level_detection_candidate("MIS READ")
+        self.assertEqual(
+            app.level_detection_prompt_label.options["text"],
+            "Learned match: Correct Name. Is this correct?",
+        )
+        self.assertEqual(config.DEFAULT_CONFIG["level_name_corrections"], {})
 
     def test_live_window_enumeration_runs(self) -> None:
         targets = window_audio.list_mute_targets(include_background_audio=True)
@@ -114,6 +155,31 @@ class GDQuietTests(unittest.TestCase):
         self.assertEqual(screen_reader.parse_percent_from_text("00/0"), 0.0)
         self.assertIsNone(screen_reader.parse_percent_from_text("NO%"))
         self.assertIsNone(screen_reader.parse_percent_from_text("Attempt 42"))
+
+    def test_level_name_detection_requires_pause_menu_text(self) -> None:
+        self.assertIsNone(screen_reader.extract_level_name_from_pause_text("Stereo Madness\n67%"))
+        self.assertEqual(
+            screen_reader.extract_level_name_from_pause_text(
+                "Stereo Madness\nAttempts: 12\nResume\nRestart\nPractice"
+            ),
+            "Stereo Madness",
+        )
+        self.assertIsNone(
+            screen_reader.extract_level_name_from_pause_text("Paused\nResume\nRestart\nPractice\nAttempts: 12")
+        )
+
+    def test_level_name_tracker_requires_stable_candidate_and_rearms(self) -> None:
+        tracker = screen_reader.LevelNameTracker()
+        self.assertIsNone(tracker.update("Stereo Madness"))
+        self.assertEqual(tracker.update("stereo madness"), "stereo madness")
+        self.assertIsNone(tracker.update("Stereo Madness"))
+        self.assertIsNone(tracker.update(None))
+        self.assertIsNone(tracker.update("Stereo Madness"))
+        self.assertEqual(tracker.update("Stereo Madness"), "Stereo Madness")
+        self.assertIsNone(tracker.update("Deadlocked"))
+        self.assertEqual(tracker.update("Deadlocked"), "Deadlocked")
+        self.assertIsNone(tracker.update("Stereo Madness"))
+        self.assertEqual(tracker.update("Stereo Madness"), "Stereo Madness")
 
     def test_winrt_ocr_reads_rendered_hud_percentages(self) -> None:
         ocr = screen_reader.WinRtPercentOcr()
@@ -781,6 +847,8 @@ class GDQuietTests(unittest.TestCase):
                 app = gdquiet.GDQuietApp(root)
                 self.assertIsNotNone(app._sidebar_logo_photo)
                 self.assertIsNotNone(app._window_icon_photo)
+                self.assertFalse(app.beta_updates_var.get())
+                self.assertFalse(app.level_detection_var.get())
                 self.assertIn("settings", app._pages)
                 self.assertIn("settings", app._nav_buttons)
                 app._show_page("settings")

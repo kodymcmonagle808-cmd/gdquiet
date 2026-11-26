@@ -24,6 +24,7 @@ from screen_reader import (
     WinRtPercentOcr,
     find_window_client_rect,
     get_virtual_screen_bounds,
+    normalize_level_name,
 )
 from updater import (
     APP_VERSION,
@@ -234,6 +235,8 @@ class GDQuietApp:
         self.global_hotkey = GlobalHotkeyWatcher(on_trigger=self._on_global_watch_toggle)
         self._pending_update: UpdateInfo | None = None
         self._dismissed_update_version: str = ""
+        self._pending_level_raw = ""
+        self._pending_level_display = ""
         self._updating = False
         self._closing = False
         self._region_delay_id: str | None = None
@@ -641,6 +644,75 @@ class GDQuietApp:
             font=("Segoe UI", 8),
         ).pack(side="left")
 
+        self.level_detection_prompt = tk.Frame(
+            self._banner_slot,
+            bg="#33270f",
+            highlightthickness=1,
+            highlightbackground=COLORS["amber"],
+            padx=12,
+            pady=8,
+        )
+        self.level_detection_prompt_label = tk.Label(
+            self.level_detection_prompt,
+            text="",
+            bg="#33270f",
+            fg=COLORS["text"],
+            font=("Segoe UI", 9, "bold"),
+            anchor="w",
+        )
+        self.level_detection_prompt_label.pack(side="left", fill="x", expand=True)
+        self._make_button(
+            self.level_detection_prompt,
+            "Correct",
+            self._edit_level_detection_candidate,
+            bg=COLORS["card_alt"],
+            padx=10,
+            pady=4,
+            font=("Segoe UI", 8, "bold"),
+        ).pack(side="left", padx=(8, 6))
+        self._make_button(
+            self.level_detection_prompt,
+            "Yes",
+            self._confirm_level_detection_candidate,
+            bg=COLORS["green"],
+            fg="#052e16",
+            hover_bg="#4ade80",
+            padx=12,
+            pady=4,
+            font=("Segoe UI", 8, "bold"),
+        ).pack(side="left", padx=(0, 6))
+        self._make_button(
+            self.level_detection_prompt,
+            "Later",
+            self._dismiss_level_detection_candidate,
+            bg=COLORS["card_alt"],
+            padx=10,
+            pady=4,
+            font=("Segoe UI", 8),
+        ).pack(side="left")
+
+        self.level_correction_row = tk.Frame(self._banner_slot, bg=COLORS["bg"])
+        self.level_correction_entry = tk.Entry(
+            self.level_correction_row,
+            bg=COLORS["input"],
+            fg=COLORS["text"],
+            insertbackground=COLORS["text"],
+            relief="flat",
+            font=("Segoe UI", 9),
+        )
+        self.level_correction_entry.pack(side="left", fill="x", expand=True, ipady=5)
+        self._make_button(
+            self.level_correction_row,
+            "Save correction",
+            self._save_level_detection_correction,
+            bg=COLORS["accent"],
+            padx=12,
+            pady=4,
+            font=("Segoe UI", 8, "bold"),
+        ).pack(side="left", padx=(8, 0))
+        self.level_correction_row.pack_forget()
+        self.level_detection_prompt.pack_forget()
+
         self._build_dashboard_page()
         self._build_apps_page()
         self._build_discord_page()
@@ -684,6 +756,19 @@ class GDQuietApp:
             fg=COLORS["subtext"],
             font=("Segoe UI", 9),
         ).pack(anchor="w", pady=(2, 14))
+        self.level_detection_status_lbl = tk.Label(
+            page,
+            text=(
+                "Level detection beta is on; waiting for a visible pause-screen title."
+                if self.cfg.get("level_detection_beta", False)
+                else "Level detection beta is off."
+            ),
+            bg=COLORS["bg"],
+            fg=COLORS["amber"] if self.cfg.get("level_detection_beta", False) else COLORS["subtext"],
+            font=("Segoe UI", 8),
+            anchor="w",
+        )
+        self.level_detection_status_lbl.pack(anchor="w", pady=(0, 8))
 
         # Card 1: Threshold + quick summary
         trig_card = self._make_card(page)
@@ -1824,20 +1909,41 @@ class GDQuietApp:
             self._on_toggle_beta_updates,
         )
 
-        # Card 5: Config & Data
+        # Experimental level detection is deliberately opt-in and disabled by default.
         c5 = self._make_card(self.settings_body, pady=12)
         c5.pack(fill="x", pady=(0, 12))
-        tk.Label(c5, text="Config & Data", bg=COLORS["card"], fg=COLORS["cyan"], font=("Segoe UI", 11, "bold")).pack(
+        tk.Label(
+            c5,
+            text="Experimental Features (Beta)",
+            bg=COLORS["card"],
+            fg=COLORS["amber"],
+            font=("Segoe UI", 11, "bold"),
+        ).pack(
+            anchor="w", pady=(0, 6)
+        )
+        self.level_detection_var = tk.BooleanVar(value=bool(self.cfg.get("level_detection_beta", False)))
+        add_toggle(
+            c5,
+            "BETA: Detect level names (risky)",
+            "Experimental OCR scans about once per second while screen watching is active and only reads a title on the pause screen. It never pauses or controls Geometry Dash. Misreads are expected; corrections are stored locally, and screenshots are not saved or uploaded.",
+            self.level_detection_var,
+            self._on_toggle_level_detection,
+        )
+
+        # Card 6: Config & Data
+        c6 = self._make_card(self.settings_body, pady=12)
+        c6.pack(fill="x", pady=(0, 12))
+        tk.Label(c6, text="Config & Data", bg=COLORS["card"], fg=COLORS["cyan"], font=("Segoe UI", 11, "bold")).pack(
             anchor="w", pady=(0, 6)
         )
         tk.Label(
-            c5,
+            c6,
             text=f"Config file: {config_path()}",
             bg=COLORS["card"],
             fg=COLORS["subtext"],
             font=("Consolas", 8),
         ).pack(anchor="w", pady=(0, 8))
-        btn_row = tk.Frame(c5, bg=COLORS["card"])
+        btn_row = tk.Frame(c6, bg=COLORS["card"])
         btn_row.pack(fill="x")
         self._make_button(
             btn_row,
@@ -2171,6 +2277,88 @@ class GDQuietApp:
         self._save_cfg()
         self._check_updates_async(silent=True)
 
+    def _on_toggle_level_detection(self) -> None:
+        enabled = bool(self.level_detection_var.get())
+        with self.cfg_lock:
+            self.cfg["level_detection_beta"] = enabled
+        self._save_cfg()
+        if enabled:
+            self.level_detection_status_lbl.configure(
+                text="Level detection beta is on; waiting for a visible pause-screen title.",
+                fg=COLORS["amber"],
+            )
+        else:
+            self.level_detection_status_lbl.configure(text="Level detection beta is off.", fg=COLORS["subtext"])
+            self._dismiss_level_detection_candidate()
+
+    def _show_level_detection_candidate(self, raw_name: str) -> None:
+        if self._closing:
+            return
+        with self.cfg_lock:
+            if not self.cfg.get("level_detection_beta", False):
+                return
+            corrections = self.cfg.get("level_name_corrections")
+            corrections = dict(corrections) if isinstance(corrections, dict) else {}
+
+        key = normalize_level_name(raw_name)
+        if not key:
+            return
+        learned_name = corrections.get(key)
+        display_name = str(learned_name or raw_name).strip()
+
+        self._pending_level_raw = raw_name
+        self._pending_level_display = display_name
+        prefix = "Learned match" if learned_name else "Detected level"
+        self.level_detection_prompt_label.configure(
+            text=f"{prefix}: {display_name}. Is this correct?"
+        )
+        self.level_correction_row.pack_forget()
+        self.level_detection_prompt.pack(fill="x", pady=(0, 8))
+        self.level_detection_status_lbl.configure(
+            text=f"Possible level detected: {display_name} (awaiting confirmation).",
+            fg=COLORS["amber"],
+        )
+
+    def _confirm_level_detection_candidate(self) -> None:
+        self._save_level_detection_feedback(self._pending_level_display)
+
+    def _edit_level_detection_candidate(self) -> None:
+        self.level_correction_entry.delete(0, "end")
+        self.level_correction_entry.insert(0, self._pending_level_display)
+        self.level_correction_row.pack(fill="x", pady=(0, 8))
+        self.level_correction_entry.focus_set()
+
+    def _save_level_detection_correction(self) -> None:
+        corrected = self.level_correction_entry.get().strip()
+        if corrected:
+            self._save_level_detection_feedback(corrected)
+        else:
+            self.level_detection_prompt_label.configure(text="Enter the correct level name, or choose Later.")
+
+    def _save_level_detection_feedback(self, accepted_name: str) -> None:
+        key = normalize_level_name(self._pending_level_raw)
+        accepted_name = accepted_name.strip()
+        if not key or not accepted_name:
+            return
+
+        with self.cfg_lock:
+            corrections = self.cfg.get("level_name_corrections")
+            learned = dict(corrections) if isinstance(corrections, dict) else {}
+            learned[key] = accepted_name
+            self.cfg["level_name_corrections"] = learned
+        self._save_cfg()
+        self.level_detection_status_lbl.configure(
+            text=f"Last confirmed level: {accepted_name} (saved on this device).",
+            fg=COLORS["green"],
+        )
+        self._dismiss_level_detection_candidate()
+
+    def _dismiss_level_detection_candidate(self) -> None:
+        self._pending_level_raw = ""
+        self._pending_level_display = ""
+        self.level_detection_prompt.pack_forget()
+        self.level_correction_row.pack_forget()
+
     def _open_config_folder(self) -> None:
         try:
             os.startfile(str(app_data_dir()))  # type: ignore[attr-defined]
@@ -2202,6 +2390,7 @@ class GDQuietApp:
         self.start_minimized_var.set(bool(self.cfg["start_minimized"]))
         self.auto_updates_var.set(bool(self.cfg["auto_check_updates"]))
         self.beta_updates_var.set(bool(self.cfg["beta_updates"]))
+        self.level_detection_var.set(bool(self.cfg["level_detection_beta"]))
         for key, (var, _mn, _mx, is_int) in self._settings_num_vars.items():
             val = self.cfg.get(key, DEFAULT_CONFIG[key])
             sval = f"{int(round(float(val)))}" if is_int else f"{float(val):.2f}".rstrip("0").rstrip(".")
@@ -2215,6 +2404,8 @@ class GDQuietApp:
         except Exception:
             pass
         self._apply_watch_toggle_hotkey()
+        self.level_detection_status_lbl.configure(text="Level detection beta is off.", fg=COLORS["subtext"])
+        self._dismiss_level_detection_candidate()
         self._force_restore_all()
         self._refresh_windows()
         self._update_sidebar_badges()
@@ -2352,6 +2543,25 @@ class GDQuietApp:
     def _on_screen_reading(self, reading: ScreenReading) -> None:
         if self._closing:
             return
+        if reading.level_name_candidate:
+            try:
+                self.root.after(
+                    0,
+                    lambda name=reading.level_name_candidate: self._show_level_detection_candidate(name),
+                )
+            except Exception:
+                pass
+        if reading.level_detection_error:
+            try:
+                self.root.after(
+                    0,
+                    lambda error=reading.level_detection_error: self.level_detection_status_lbl.configure(
+                        text=f"Beta scan error: {error[:100]}",
+                        fg=COLORS["red"],
+                    ),
+                )
+            except Exception:
+                pass
         just_finished = False
         with self.test_lock:
             testing = self.test_session.active

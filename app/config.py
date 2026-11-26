@@ -40,6 +40,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "start_minimized": False,
     "auto_check_updates": True,
     "beta_updates": False,
+    "level_detection_beta": False,
+    "level_name_corrections": {},
     "test_duration_s": 30.0,
 }
 
