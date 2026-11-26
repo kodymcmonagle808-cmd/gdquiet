@@ -19,11 +19,36 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: python -c "import json, os, re; from pathlib import Path; ver = os.environ['RELEASE_TAG'].lstrip('vV'); p = Path('app/updater.py'); p.write_text(re.sub(r'^APP_VERSION = .*$', 'APP_VERSION = ' + json.dumps(ver), p.read_text(encoding='utf-8'), flags=re.M), encoding='utf-8')"
       - run: python -m unittest discover -s tests -v
-      - run: pyinstaller --onefile --noconsole --name GDQuiet --paths app --collect-submodules winrt --collect-binaries winrt --collect-data winrt --hidden-import=PIL._tkinter_finder app/gdquiet.py
+      - name: Build GDQuiet.exe
+        run: pyinstaller --onefile --noconsole --name GDQuiet --icon app/assets/gdquiet.ico --add-data "logo.png;." --add-data "app/assets/gdquiet.ico;assets" --paths app --collect-submodules winrt --collect-binaries winrt --collect-data winrt --hidden-import=PIL._tkinter_finder app/gdquiet.py
+      - name: Build GDQuiet-Setup.exe Wizard
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $ver = if ($env:RELEASE_TAG -and $env:RELEASE_TAG.StartsWith('v', [System.StringComparison]::OrdinalIgnoreCase)) {
+            $env:RELEASE_TAG.Substring(1)
+          } else {
+            (python -c "import sys; sys.path.insert(0, 'app'); import updater; print(updater.APP_VERSION)").Trim()
+          }
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1)
+          if (-not $iscc) {
+            foreach ($cand in @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:LocalAppData\Programs\Inno Setup 6\ISCC.exe")) {
+              if (Test-Path $cand) { $iscc = $cand; break }
+            }
+          }
+          if (-not $iscc) {
+            choco install innosetup -y --no-progress
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          }
+          & $iscc "/DMyAppVersion=$ver" installer/gdquiet.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
           name: app
-          path: dist/GDQuiet.exe
+          path: |
+            dist/GDQuiet-Setup.exe
+            dist/GDQuiet.exe
 
   release:
     needs: [app]
@@ -35,8 +60,14 @@ jobs:
         with:
           merge-multiple: true
           path: out
-      - name: Upload GDQuiet.exe asset
+      - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
+          body: |
+            ### Install GD Quiet
+            Download and run **`GDQuiet-Setup.exe`** to open the Windows Setup Wizard (review and accept terms, choose your install location and shortcuts, then launch GD Quiet).
+
+            *(Existing v3.0.9+ installs can also update automatically in-app via `GDQuiet.exe`.)*
           files: |
+            out/GDQuiet-Setup.exe
             out/GDQuiet.exe

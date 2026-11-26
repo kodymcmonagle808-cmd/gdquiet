@@ -12,7 +12,7 @@ Standalone Windows app (`GDQuiet.exe`) that reads your level percentage directly
 
 ## Usage
 
-1. Download and run **`GDQuiet.exe`** from the Releases page (future updates can be installed directly inside the app via **Check for Updates**).
+1. Download and run **`GDQuiet-Setup.exe`** from the Releases page to walk through the Setup Wizard (accept terms, choose install folder/shortcuts, then launch GD Quiet). Future updates can be installed directly inside the app via **Check for Updates**.
 2. In Geometry Dash **Graphics** settings, use **Windowed** or **Borderless** mode and make sure **Show Percentage** is enabled.
 3. In `GDQuiet.exe`:
    - Check the open windows/apps you want muted.

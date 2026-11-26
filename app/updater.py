@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-APP_VERSION = "3.0.9"
+APP_VERSION = "3.1.0"
 GITHUB_REPO = "kodymcmonagle808-cmd/gdquiet"
 RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 RELEASES_PAGE_URL = f"https://github.com/{GITHUB_REPO}/releases"
@@ -59,7 +59,7 @@ def _select_exe_asset(assets: list[dict[str, object]]) -> dict[str, object] | No
             return asset
     for asset in assets:
         name = str(asset.get("name") or "").lower()
-        if name.endswith(".exe"):
+        if name.endswith(".exe") and "setup" not in name and "installer" not in name:
             return asset
     return None
 

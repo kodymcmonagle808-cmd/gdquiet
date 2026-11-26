@@ -1,0 +1,30 @@
+GD QUIET - SOFTWARE LICENSE & TERMS OF USE
+
+Please read these terms carefully before installing and using GD Quiet.
+
+1. LICENSE GRANT (MIT LICENSE)
+GD Quiet is open-source software licensed under the MIT License.
+You are free to install, use, copy, modify, and distribute this software
+for personal or community use in accordance with these terms.
+
+2. HOW GD QUIET WORKS
+GD Quiet runs locally on your Windows PC and reads only the configured
+screen region (or Geometry Dash window percentage) using Windows OCR to:
+  - Mute or unmute the background Windows apps you explicitly choose.
+  - Optionally send your configured Discord "Toggle Deafen" hotkey.
+All percentage detection, audio control, and configuration happen locally
+on your device. No gameplay footage or personal audio is uploaded.
+
+3. USER RESPONSIBILITY
+You are responsible for configuring your mute threshold, target apps,
+screen capture region, and Discord hotkeys appropriately before using GD Quiet.
+
+4. DISCLAIMER OF WARRANTY & LIMITATION OF LIABILITY
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+LIABILITY ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE
+OF THIS SOFTWARE.
+
+Click "I accept the agreement" below to continue installing GD Quiet.

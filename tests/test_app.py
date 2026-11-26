@@ -491,6 +491,17 @@ class GDQuietTests(unittest.TestCase):
         self.assertFalse(updater.is_newer_version("v3.0.7", "3.0.7"))
         self.assertFalse(updater.is_newer_version("3.0.6", "3.0.7"))
 
+        # Installer EXEs must never be selected for binary self-update replacement
+        self.assertIsNone(updater._select_exe_asset([{"name": "GDQuiet-Setup.exe"}]))
+        chosen = updater._select_exe_asset(
+            [
+                {"name": "GDQuiet-Setup.exe", "browser_download_url": "https://example.com/setup.exe"},
+                {"name": "GDQuiet.exe", "browser_download_url": "https://example.com/GDQuiet.exe"},
+            ]
+        )
+        self.assertIsNotNone(chosen)
+        self.assertEqual(chosen["name"], "GDQuiet.exe")
+
         payload = b"MZ" + b"\x90" * 512
         sha = hashlib.sha256(payload).hexdigest()
         release_json = json.dumps(
@@ -658,6 +669,40 @@ class GDQuietTests(unittest.TestCase):
                 )
                 self.assertFalse(app.current_want_mute)
 
+                app._on_close()
+        finally:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+
+    def test_logo_and_icon_assets_load_in_app(self) -> None:
+        import tkinter as tk
+        from PIL import Image
+        import gdquiet
+
+        repo_root = Path(__file__).resolve().parent.parent
+        logo_path = repo_root / "logo.png"
+        ico_path = repo_root / "app" / "assets" / "gdquiet.ico"
+        self.assertTrue(logo_path.is_file())
+        self.assertTrue(ico_path.is_file())
+        with Image.open(logo_path) as im:
+            self.assertEqual(im.size, (256, 256))
+            self.assertEqual(im.mode, "RGBA")
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            with (
+                patch.object(gdquiet, "load_config", return_value=dict(config.DEFAULT_CONFIG)),
+                patch.object(gdquiet, "save_config"),
+                patch.object(gdquiet, "list_mute_targets", return_value=[]),
+                patch.object(gdquiet, "list_open_window_processes", return_value=[]),
+                patch.object(gdquiet, "ScreenPercentWatcher"),
+            ):
+                app = gdquiet.GDQuietApp(root)
+                self.assertIsNotNone(app._sidebar_logo_photo)
+                self.assertIsNotNone(app._window_icon_photo)
                 app._on_close()
         finally:
             try:

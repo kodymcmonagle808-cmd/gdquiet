@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import atexit
 import ctypes
+from pathlib import Path
 import sys
 import threading
 import time
@@ -182,6 +183,20 @@ class RegionSelectorOverlay:
         self.on_cancel()
 
 
+def _resource_path(rel_path: str) -> Path:
+    candidates: list[Path] = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(str(meipass)) / rel_path)
+    app_dir = Path(__file__).resolve().parent
+    candidates.append(app_dir / rel_path)
+    candidates.append(app_dir.parent / rel_path)
+    for cand in candidates:
+        if cand.exists():
+            return cand
+    return candidates[0]
+
+
 class GDQuietApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -189,6 +204,9 @@ class GDQuietApp:
         self.root.geometry("940x650")
         self.root.minsize(860, 590)
         self.root.configure(bg=COLORS["bg"])
+        self._window_icon_photo: ImageTk.PhotoImage | None = None
+        self._sidebar_logo_photo: ImageTk.PhotoImage | None = None
+        self._apply_window_icons()
 
         self.cfg_lock = threading.RLock()
         self.cfg = load_config()
@@ -328,12 +346,40 @@ class GDQuietApp:
             pady=pady,
         )
 
+    def _apply_window_icons(self) -> None:
+        ico_path = _resource_path("assets/gdquiet.ico")
+        if ico_path.is_file():
+            try:
+                self.root.iconbitmap(default=str(ico_path))
+            except Exception:
+                try:
+                    self.root.iconbitmap(str(ico_path))
+                except Exception:
+                    pass
+        logo_path = _resource_path("logo.png")
+        if logo_path.is_file():
+            try:
+                with Image.open(logo_path) as img:
+                    icon_img = img.convert("RGBA").resize((64, 64), Image.Resampling.LANCZOS)
+                self._window_icon_photo = ImageTk.PhotoImage(icon_img)
+                self.root.iconphoto(True, self._window_icon_photo)
+            except Exception:
+                pass
+
     def _draw_logo(self, canvas: tk.Canvas) -> None:
+        logo_path = _resource_path("logo.png")
+        if logo_path.is_file():
+            try:
+                with Image.open(logo_path) as img:
+                    badge = img.convert("RGBA").resize((38, 38), Image.Resampling.LANCZOS)
+                self._sidebar_logo_photo = ImageTk.PhotoImage(badge)
+                canvas.create_image(19, 19, image=self._sidebar_logo_photo)
+                return
+            except Exception:
+                pass
         canvas.create_rectangle(2, 2, 36, 36, fill=COLORS["accent"], outline="#818cf8", width=1)
-        # Speaker silhouette
         canvas.create_rectangle(9, 14, 15, 24, fill="#f8fafc", outline="")
         canvas.create_polygon(15, 14, 24, 8, 24, 30, 15, 24, fill="#f8fafc", outline="")
-        # Mute slash
         canvas.create_line(9, 9, 29, 29, fill=COLORS["red"], width=3, capstyle="round")
 
     def _build_ui(self) -> None:
@@ -2466,6 +2512,11 @@ def main() -> None:
             ocr.close()
         _ = list_mute_targets(include_background_audio=False)
         return
+
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("kodymcmonagle.gdquiet.desktop")
+    except Exception:
+        pass
 
     root = tk.Tk()
     GDQuietApp(root)
