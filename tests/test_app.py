@@ -591,6 +591,74 @@ class GDQuietTests(unittest.TestCase):
             except Exception:
                 pass
 
+    def test_update_banner_shows_and_dismisses_and_pause_guard(self) -> None:
+        import tkinter as tk
+        import gdquiet
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            with (
+                patch.object(gdquiet, "load_config", return_value=dict(config.DEFAULT_CONFIG)),
+                patch.object(gdquiet, "save_config"),
+                patch.object(gdquiet, "list_mute_targets", return_value=[]),
+                patch.object(gdquiet, "list_open_window_processes", return_value=[]),
+                patch.object(gdquiet, "ScreenPercentWatcher"),
+            ):
+                app = gdquiet.GDQuietApp(root)
+                self.assertEqual(app.update_banner.winfo_manager(), "")
+
+                info1 = updater.UpdateInfo(
+                    current_version="3.0.8",
+                    latest_version="9.9.9",
+                    tag_name="v9.9.9",
+                    update_available=True,
+                    download_url="https://example.com/GDQuiet.exe",
+                    release_url="https://example.com",
+                    asset_name="GDQuiet.exe",
+                    size_bytes=1024,
+                    sha256="a" * 64,
+                    release_notes="",
+                )
+                app._on_update_checked(info1, silent=True)
+                self.assertEqual(app.update_banner.winfo_manager(), "pack")
+                self.assertIn("9.9.9", app.update_banner_lbl.cget("text"))
+                self.assertEqual(app.update_btn.cget("text"), "Install v9.9.9 Update")
+
+                app._dismiss_update_banner()
+                self.assertEqual(app.update_banner.winfo_manager(), "")
+                # Same version should stay dismissed on background re-check
+                app._on_update_checked(info1, silent=True)
+                self.assertEqual(app.update_banner.winfo_manager(), "")
+
+                # Newer version shows the banner again
+                info2 = updater.UpdateInfo(**{**info1.__dict__, "latest_version": "9.9.10", "tag_name": "v9.9.10"})
+                app._on_update_checked(info2, silent=True)
+                self.assertEqual(app.update_banner.winfo_manager(), "pack")
+                self.assertIn("9.9.10", app.update_banner_lbl.cget("text"))
+
+                # Pause watching guard ignores stale in-flight should_mute=True frame
+                with app.cfg_lock:
+                    app.cfg["watch_enabled"] = False
+                app._on_screen_reading(
+                    screen_reader.ScreenReading(
+                        percent=75.0,
+                        raw_text="75%",
+                        should_mute=True,
+                        is_playing=True,
+                        status_text="Watching",
+                        preview_image=None,
+                    )
+                )
+                self.assertFalse(app.current_want_mute)
+
+                app._on_close()
+        finally:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+
 
 if __name__ == "__main__":
     unittest.main()

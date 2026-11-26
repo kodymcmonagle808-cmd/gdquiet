@@ -210,7 +210,9 @@ class GDQuietApp:
         self._hk_capture_state: tuple[tk.Button, str, str, Callable[[], None] | None] | None = None
         self.global_hotkey = GlobalHotkeyWatcher(on_trigger=self._on_global_watch_toggle)
         self._pending_update: UpdateInfo | None = None
+        self._dismissed_update_version: str = ""
         self._updating = False
+        self._closing = False
         self._region_delay_id: str | None = None
         self._last_audio_enforce_at = 0.0
         self.window_vars: dict[str, tk.BooleanVar] = {}
@@ -237,9 +239,12 @@ class GDQuietApp:
 
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         atexit.register(self._cleanup_sync)
-        self.root.after(150, self._test_ui_tick)
+        self._test_tick_id: str | None = self.root.after(150, self._test_ui_tick)
         self._startup_update_id: str | None = self.root.after(
             1500, lambda: self._check_updates_async(silent=True)
+        )
+        self._periodic_update_id: str | None = self.root.after(
+            300000, self._schedule_periodic_update_check
         )
 
     def _snapshot_cfg(self) -> dict[str, Any]:
@@ -490,6 +495,51 @@ class GDQuietApp:
         # Right Main Content Area
         self.main_area = tk.Frame(shell, bg=COLORS["bg"], padx=22, pady=18)
         self.main_area.pack(side="left", fill="both", expand=True)
+
+        # Prominent top Update Banner slot (packed/shown dynamically when a newer release exists)
+        self._banner_slot = tk.Frame(self.main_area, bg=COLORS["bg"])
+        self._banner_slot.pack(fill="x")
+
+        self.update_banner = tk.Frame(
+            self._banner_slot,
+            bg="#0f2942",
+            highlightthickness=1,
+            highlightbackground=COLORS["cyan"],
+            padx=12,
+            pady=8,
+        )
+        self.update_banner_lbl = tk.Label(
+            self.update_banner,
+            text="",
+            bg="#0f2942",
+            fg=COLORS["text"],
+            font=("Segoe UI", 9, "bold"),
+            anchor="w",
+        )
+        self.update_banner_lbl.pack(side="left", fill="x", expand=True)
+
+        self.update_banner_btn = self._make_button(
+            self.update_banner,
+            "Update Now",
+            self._on_update_banner_install,
+            bg=COLORS["cyan"],
+            fg="#082f49",
+            hover_bg="#7dd3fc",
+            padx=12,
+            pady=4,
+            font=("Segoe UI", 8, "bold"),
+        )
+        self.update_banner_btn.pack(side="left", padx=(8, 6))
+
+        self._make_button(
+            self.update_banner,
+            "Later",
+            self._dismiss_update_banner,
+            bg=COLORS["card_alt"],
+            padx=10,
+            pady=4,
+            font=("Segoe UI", 8),
+        ).pack(side="left")
 
         self._build_dashboard_page()
         self._build_apps_page()
@@ -1407,6 +1457,8 @@ class GDQuietApp:
         self._update_status_indicators()
 
     def _test_ui_tick(self) -> None:
+        if self._closing:
+            return
         just_completed = False
         with self.test_lock:
             active = self.test_session.active
@@ -1452,7 +1504,8 @@ class GDQuietApp:
         else:
             self._draw_test_progress(0.0)
 
-        self.root.after(150, self._test_ui_tick)
+        if not self._closing:
+            self._test_tick_id = self.root.after(150, self._test_ui_tick)
 
     def _finish_screen_test_ui(self) -> None:
         with self.test_lock:
@@ -1667,11 +1720,16 @@ class GDQuietApp:
         self.root.after(220, self._open_region_overlay)
 
     def _open_region_overlay(self) -> None:
-        RegionSelectorOverlay(
-            self.root,
-            on_selected=self._on_region_selected,
-            on_cancel=self._on_region_cancelled,
-        )
+        try:
+            RegionSelectorOverlay(
+                self.root,
+                on_selected=self._on_region_selected,
+                on_cancel=self._on_region_cancelled,
+            )
+        except Exception as exc:
+            self.root.deiconify()
+            self.root.lift()
+            messagebox.showerror("Capture Failed", f"Could not grab screen for region selection: {exc}")
 
     def _apply_region_preset(self, label: str, rx: float, ry: float, rw: float, rh: float) -> None:
         target_proc = self.target_proc_var.get().strip().lower() or "geometrydash.exe"
@@ -1741,13 +1799,17 @@ class GDQuietApp:
         self._save_cfg()
 
     def _on_screen_reading(self, reading: ScreenReading) -> None:
+        if self._closing:
+            return
         just_finished = False
         with self.test_lock:
             testing = self.test_session.active
             if testing:
                 just_finished = self.test_session.record(reading.percent)
 
-        effective_mute = False if testing else reading.should_mute
+        with self.cfg_lock:
+            watch_enabled = bool(self.cfg.get("watch_enabled", True))
+        effective_mute = False if (testing or not watch_enabled) else reading.should_mute
         now_m = time.monotonic()
         if effective_mute != self.current_want_mute:
             self.current_want_mute = effective_mute
@@ -1761,7 +1823,7 @@ class GDQuietApp:
 
         with self.reading_lock:
             self._latest_reading = reading
-            if not self._ui_reading_pending:
+            if not self._ui_reading_pending and not self._closing:
                 self._ui_reading_pending = True
                 try:
                     self.root.after(0, lambda jf=just_finished: self._render_screen_reading(jf))
@@ -2205,6 +2267,36 @@ class GDQuietApp:
         self._update_sidebar_badges()
         self._update_status_indicators()
 
+    def _show_update_banner(self, info: UpdateInfo) -> None:
+        self.update_banner_lbl.configure(
+            text=f"GD Quiet v{info.latest_version} is available (current: v{info.current_version}) — update automatically?"
+        )
+        if not self.update_banner.winfo_manager():
+            self.update_banner.pack(fill="x", pady=(0, 12))
+            try:
+                self.root.bell()
+            except Exception:
+                pass
+
+    def _dismiss_update_banner(self) -> None:
+        if self._pending_update is not None:
+            self._dismissed_update_version = self._pending_update.latest_version
+        self.update_banner.pack_forget()
+
+    def _on_update_banner_install(self) -> None:
+        if self._pending_update is not None and self._pending_update.update_available:
+            self._prompt_and_install_update(self._pending_update)
+        else:
+            self._check_updates_async(silent=False)
+
+    def _schedule_periodic_update_check(self) -> None:
+        if self._closing:
+            return
+        if not self._updating:
+            self._check_updates_async(silent=True)
+        if not self._closing:
+            self._periodic_update_id = self.root.after(300000, self._schedule_periodic_update_check)
+
     def _on_update_button_click(self) -> None:
         if self._updating:
             return
@@ -2214,7 +2306,7 @@ class GDQuietApp:
             self._check_updates_async(silent=False)
 
     def _check_updates_async(self, silent: bool = True) -> None:
-        if self._updating:
+        if self._updating or self._closing:
             return
         if not silent:
             self.update_btn.configure(state="disabled", text="Checking...")
@@ -2223,13 +2315,17 @@ class GDQuietApp:
         def worker() -> None:
             try:
                 info = check_for_update(current_version=APP_VERSION)
-                self.root.after(0, lambda i=info, s=silent: self._on_update_checked(i, s))
+                if not self._closing:
+                    self.root.after(0, lambda i=info, s=silent: self._on_update_checked(i, s))
             except Exception as exc:
-                self.root.after(0, lambda err=str(exc), s=silent: self._on_update_check_failed(err, s))
+                if not self._closing:
+                    self.root.after(0, lambda err=str(exc), s=silent: self._on_update_check_failed(err, s))
 
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_update_checked(self, info: UpdateInfo, silent: bool) -> None:
+        if self._closing:
+            return
         if not self._updating:
             self.update_btn.configure(state="normal")
         if info.update_available:
@@ -2242,10 +2338,13 @@ class GDQuietApp:
             self.update_btn._base_bg = COLORS["cyan_dark"]  # type: ignore[attr-defined]
             self.update_btn._hover_bg = COLORS["cyan"]  # type: ignore[attr-defined]
             self.footer_error.configure(text=f"Update v{info.latest_version} ready!", fg=COLORS["cyan"])
+            if not silent or info.latest_version != self._dismissed_update_version:
+                self._show_update_banner(info)
             if not silent:
                 self._prompt_and_install_update(info)
         else:
             self._pending_update = None
+            self.update_banner.pack_forget()
             self.update_btn.configure(text="Check for Updates", bg=COLORS["card_alt"], fg=COLORS["text"])
             self.update_btn._base_bg = COLORS["card_alt"]  # type: ignore[attr-defined]
             self.update_btn._hover_bg = COLORS["hover"]  # type: ignore[attr-defined]
@@ -2254,6 +2353,8 @@ class GDQuietApp:
                 messagebox.showinfo("Up to Date", f"You are already running the latest version (v{APP_VERSION}).")
 
     def _on_update_check_failed(self, err: str, silent: bool) -> None:
+        if self._closing:
+            return
         if not self._updating:
             self.update_btn.configure(state="normal", text="Check for Updates")
         if not silent:
@@ -2276,6 +2377,7 @@ class GDQuietApp:
 
         self._updating = True
         self.update_btn.configure(state="disabled", text="Downloading 0%...")
+        self.update_banner_btn.configure(state="disabled", text="Updating...")
         self.footer_error.configure(text=f"Downloading v{info.latest_version}...", fg=COLORS["cyan"])
 
         def worker() -> None:
@@ -2284,6 +2386,8 @@ class GDQuietApp:
 
                 def on_prog(done: int, total: int) -> None:
                     pct_txt = f"{int(done * 100 / total)}%" if total > 0 else f"{done // 1024} KB"
+                    if self._closing:
+                        return
                     try:
                         self.root.after(0, lambda t=pct_txt: self.update_btn.configure(text=f"Downloading {t}..."))
                     except Exception:
@@ -2304,8 +2408,11 @@ class GDQuietApp:
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_update_install_failed(self, err: str) -> None:
+        if self._closing:
+            return
         self._updating = False
         self.update_btn.configure(state="normal", text="Retry Update")
+        self.update_banner_btn.configure(state="normal", text="Update Now")
         self.footer_error.configure(text=f"Update failed: {err}", fg=COLORS["amber"])
         messagebox.showerror("Update Failed", err)
 
@@ -2326,14 +2433,20 @@ class GDQuietApp:
             self.audio_ctrl.restore()
             self.discord_ctrl.restore(self.cfg.get("deafen_hotkey"))
 
-    def _on_close(self) -> None:
-        self._cancel_delay_pick()
-        if getattr(self, "_startup_update_id", None) is not None:
+    def _cancel_after(self, attr_name: str) -> None:
+        after_id = getattr(self, attr_name, None)
+        if after_id is not None:
             try:
-                self.root.after_cancel(self._startup_update_id)
+                self.root.after_cancel(after_id)
             except Exception:
                 pass
-            self._startup_update_id = None
+            setattr(self, attr_name, None)
+
+    def _on_close(self) -> None:
+        self._closing = True
+        self._cancel_delay_pick()
+        for timer_attr in ("_startup_update_id", "_periodic_update_id", "_test_tick_id"):
+            self._cancel_after(timer_attr)
         self._cleanup_sync()
         self._save_cfg()
         self.root.destroy()

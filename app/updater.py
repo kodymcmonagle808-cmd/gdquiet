@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-APP_VERSION = "3.0.7"
+APP_VERSION = "3.0.8"
 GITHUB_REPO = "kodymcmonagle808-cmd/gdquiet"
 RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 RELEASES_PAGE_URL = f"https://github.com/{GITHUB_REPO}/releases"
@@ -202,7 +202,7 @@ def write_self_update_script(current_pid: int) -> Path:
             'set "SRC=%~2"',
             'set "DST=%~3"',
             "for /l %%i in (1,1,40) do (",
-            '  tasklist /fi "PID eq %PID%" 2>nul | find "%PID%" >nul',
+            '  tasklist /nh /fo csv /fi "PID eq %PID%" 2>nul | findstr /c:",\\"%PID%\\"," >nul',
             "  if errorlevel 1 goto apply",
             "  ping -n 2 127.0.0.1 >nul",
             ")",

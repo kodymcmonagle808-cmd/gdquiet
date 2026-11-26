@@ -230,6 +230,8 @@ def _prepare_ocr_gray(
     luma_fallback: bool = False,
 ) -> tuple[Image.Image | None, tuple[int, int, int, int] | None]:
     """Extract high-contrast ink crop padded for WinRT OCR, skipping blank frames."""
+    if img.width < 4 or img.height < 4:
+        return None, None
     ink = _extract_ink(img, luma_fallback=luma_fallback)
     if ink.getextrema()[0] >= 245:
         return None, None
