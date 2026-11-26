@@ -17,6 +17,7 @@ from PIL import Image, ImageEnhance, ImageTk
 
 from config import DEFAULT_CONFIG, app_data_dir, config_path, load_config, save_config
 from discord_hotkey import DiscordDeafenController, GlobalHotkeyWatcher, parse_tk_hotkey, send_hotkey
+from obs_overlay import OverlayServer
 from screen_reader import (
     ScreenPercentWatcher,
     ScreenReading,
@@ -237,6 +238,10 @@ class GDQuietApp:
         self._dismissed_update_version: str = ""
         self._pending_level_raw = ""
         self._pending_level_display = ""
+        self.obs_overlay_server = OverlayServer(
+            get_status=self._get_obs_overlay_status,
+            on_control=self._queue_obs_overlay_control,
+        )
         self._updating = False
         self._closing = False
         self._region_delay_id: str | None = None
@@ -252,6 +257,8 @@ class GDQuietApp:
 
         self._setup_styles()
         self._build_ui()
+        if self.cfg.get("obs_overlay_enabled", False):
+            self._start_obs_overlay(show_error=False)
         self._apply_window_preferences()
         self._apply_watch_toggle_hotkey()
         self._show_page("dashboard")
@@ -1930,7 +1937,84 @@ class GDQuietApp:
             self._on_toggle_level_detection,
         )
 
-        # Card 6: Config & Data
+        # Card 6: OBS Browser Source
+        obs_card = self._make_card(self.settings_body, pady=12)
+        obs_card.pack(fill="x", pady=(0, 12))
+        self._make_section_heading(obs_card, "OBS Studio Overlay")
+        tk.Label(
+            obs_card,
+            text=(
+                "Show live progress, mute state, and the current threshold in OBS. "
+                "The overlay also lets you pause watching and adjust the threshold; use OBS's "
+                "right-click → Interact menu to operate its controls."
+            ),
+            bg=COLORS["card"],
+            fg=COLORS["subtext"],
+            font=("Segoe UI", 9),
+            wraplength=680,
+            justify="left",
+        ).pack(anchor="w", fill="x", pady=(0, 10))
+        tk.Label(
+            obs_card,
+            text="Add a Browser Source at 560 × 300 and use this local URL:",
+            bg=COLORS["card"],
+            fg=COLORS["text"],
+            font=("Segoe UI", 9, "bold"),
+        ).pack(anchor="w", pady=(0, 5))
+
+        obs_url_row = tk.Frame(obs_card, bg=COLORS["card"])
+        obs_url_row.pack(fill="x", pady=(0, 9))
+        self.obs_overlay_url_var = tk.StringVar(value=self.obs_overlay_server.url)
+        tk.Label(
+            obs_url_row,
+            textvariable=self.obs_overlay_url_var,
+            bg=COLORS["input"],
+            fg=COLORS["cyan"],
+            font=("Consolas", 9, "bold"),
+            padx=10,
+            pady=7,
+            anchor="w",
+        ).pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self._make_button(
+            obs_url_row,
+            "Copy URL",
+            self._copy_obs_overlay_url,
+            padx=11,
+            pady=6,
+            font=("Segoe UI", 8, "bold"),
+        ).pack(side="left")
+
+        obs_controls = tk.Frame(obs_card, bg=COLORS["card"])
+        obs_controls.pack(fill="x")
+        self.obs_overlay_toggle_btn = self._make_button(
+            obs_controls,
+            "Stop OBS Overlay" if self.obs_overlay_server.running else "Enable OBS Overlay",
+            self._toggle_obs_overlay,
+            bg=COLORS["accent"],
+            padx=12,
+            pady=6,
+            font=("Segoe UI", 8, "bold"),
+        )
+        self.obs_overlay_toggle_btn.pack(side="left", padx=(0, 10))
+        self._make_button(
+            obs_controls,
+            "Preview Overlay",
+            self._open_obs_overlay_preview,
+            padx=12,
+            pady=6,
+            font=("Segoe UI", 8, "bold"),
+        ).pack(side="left")
+        self.obs_overlay_status_lbl = tk.Label(
+            obs_card,
+            text=self._obs_overlay_status_text(),
+            bg=COLORS["card"],
+            fg=COLORS["green"] if self.obs_overlay_server.running else COLORS["subtext"],
+            font=("Segoe UI", 8),
+            anchor="w",
+        )
+        self.obs_overlay_status_lbl.pack(anchor="w", pady=(8, 0))
+
+        # Card 7: Config & Data
         c6 = self._make_card(self.settings_body, pady=12)
         c6.pack(fill="x", pady=(0, 12))
         tk.Label(c6, text="Config & Data", bg=COLORS["card"], fg=COLORS["cyan"], font=("Segoe UI", 11, "bold")).pack(
@@ -2374,6 +2458,14 @@ class GDQuietApp:
         with self.cfg_lock:
             self.cfg = dict(DEFAULT_CONFIG)
         self._save_cfg()
+        if self.obs_overlay_server.running:
+            self._stop_obs_overlay(persist=False)
+        else:
+            self.obs_overlay_toggle_btn.configure(text="Enable OBS Overlay")
+            self.obs_overlay_status_lbl.configure(
+                text="Overlay server stopped. It only listens on this computer.",
+                fg=COLORS["subtext"],
+            )
 
         pct = float(self.cfg["mute_at_percent"])
         self.percent_var.set(pct)
@@ -2768,6 +2860,121 @@ class GDQuietApp:
         if hasattr(self, "_settings_num_vars") and "mute_at_percent" in self._settings_num_vars:
             self._settings_num_vars["mute_at_percent"][0].set(f"{pct:.0f}")
         self._update_sidebar_badges()
+
+    def _get_obs_overlay_status(self) -> dict[str, Any]:
+        with self.cfg_lock:
+            watching = bool(self.cfg.get("watch_enabled", True))
+            threshold = float(self.cfg.get("mute_at_percent", 50.0))
+        with self.reading_lock:
+            reading = self._latest_reading
+        with self.test_lock:
+            testing = bool(self.test_session.active)
+
+        return {
+            "watching": watching,
+            "muted": bool(self.audio_ctrl.muted_session_count or self.discord_ctrl.deafened_by_us),
+            "percent": reading.percent if reading is not None else None,
+            "threshold": threshold,
+            "testing": testing,
+        }
+
+    def _queue_obs_overlay_control(self, payload: dict[str, Any]) -> bool:
+        if self._closing:
+            return False
+        try:
+            self.root.after(0, lambda values=dict(payload): self._apply_obs_overlay_control(values))
+        except Exception:
+            return False
+        return True
+
+    def _apply_obs_overlay_control(self, payload: dict[str, Any]) -> None:
+        if self._closing:
+            return
+        action = payload.get("action")
+        if action == "watch":
+            with self.cfg_lock:
+                currently_watching = bool(self.cfg.get("watch_enabled", True))
+            if currently_watching != payload.get("enabled"):
+                self._toggle_watching()
+        elif action == "threshold":
+            try:
+                value = float(payload["value"])
+            except (KeyError, TypeError, ValueError):
+                return
+            if not 0 <= value <= 100:
+                return
+            self.percent_var.set(value)
+            self.percent_entry_var.set(f"{value:.0f}")
+            self._save_mute_percent()
+
+    def _obs_overlay_status_text(self) -> str:
+        if self.obs_overlay_server.running:
+            return f"Overlay server running at {self.obs_overlay_server.url}"
+        if self.cfg.get("obs_overlay_enabled", False):
+            return "Overlay is enabled in settings but the local server is not running."
+        return "Overlay server is stopped. It only listens on this computer."
+
+    def _start_obs_overlay(self, show_error: bool = True, persist: bool = True) -> bool:
+        try:
+            url = self.obs_overlay_server.start()
+        except OSError as exc:
+            self.obs_overlay_status_lbl.configure(
+                text=f"Could not start OBS overlay: {exc}",
+                fg=COLORS["red"],
+            )
+            self.obs_overlay_toggle_btn.configure(text="Enable OBS Overlay")
+            if show_error:
+                messagebox.showerror("OBS Overlay", f"Could not start the local overlay server:\n{exc}")
+            return False
+
+        self.obs_overlay_url_var.set(url)
+        self.obs_overlay_toggle_btn.configure(text="Stop OBS Overlay")
+        self.obs_overlay_status_lbl.configure(
+            text=f"Running locally at {url}. Add that URL as an OBS Browser Source.",
+            fg=COLORS["green"],
+        )
+        if persist:
+            with self.cfg_lock:
+                self.cfg["obs_overlay_enabled"] = True
+            self._save_cfg()
+        return True
+
+    def _stop_obs_overlay(self, persist: bool = True) -> None:
+        self.obs_overlay_server.stop()
+        self.obs_overlay_toggle_btn.configure(text="Enable OBS Overlay")
+        self.obs_overlay_status_lbl.configure(
+            text="Overlay server stopped. OBS will show it again when you enable it.",
+            fg=COLORS["subtext"],
+        )
+        if persist:
+            with self.cfg_lock:
+                self.cfg["obs_overlay_enabled"] = False
+            self._save_cfg()
+
+    def _toggle_obs_overlay(self) -> None:
+        if self.obs_overlay_server.running:
+            self._stop_obs_overlay()
+        else:
+            self._start_obs_overlay()
+
+    def _copy_obs_overlay_url(self) -> None:
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(self.obs_overlay_server.url)
+            self.obs_overlay_status_lbl.configure(
+                text="OBS Browser Source URL copied to clipboard.",
+                fg=COLORS["green"],
+            )
+        except tk.TclError as exc:
+            self.obs_overlay_status_lbl.configure(text=f"Could not copy URL: {exc}", fg=COLORS["red"])
+
+    def _open_obs_overlay_preview(self) -> None:
+        if not self.obs_overlay_server.running and not self._start_obs_overlay():
+            return
+        try:
+            webbrowser.open(self.obs_overlay_server.url)
+        except Exception as exc:
+            messagebox.showerror("OBS Overlay", f"Could not open the preview:\n{exc}")
 
     def _apply_worker(self) -> None:
         last_applied: bool | None = None
@@ -3232,6 +3439,8 @@ class GDQuietApp:
         self._on_close()
 
     def _cleanup_sync(self) -> None:
+        if hasattr(self, "obs_overlay_server") and self.obs_overlay_server:
+            self.obs_overlay_server.stop()
         if hasattr(self, "global_hotkey") and self.global_hotkey:
             self.global_hotkey.stop()
         if hasattr(self, "watcher") and self.watcher:

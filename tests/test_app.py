@@ -65,11 +65,13 @@ class GDQuietTests(unittest.TestCase):
             self.assertEqual(chrome.SimpleAudioVolume.muted, 1)
             self.assertEqual(spotify_already_muted.SimpleAudioVolume.muted, 1)
             self.assertEqual(discord.SimpleAudioVolume.muted, 0)
+            self.assertEqual(ctrl.muted_session_count, 1)
 
             ctrl.apply(["chrome.exe", "spotify.exe"], mute=False)
             self.assertEqual(chrome.SimpleAudioVolume.muted, 0)
             self.assertEqual(spotify_already_muted.SimpleAudioVolume.muted, 1)
             self.assertEqual(discord.SimpleAudioVolume.muted, 0)
+            self.assertEqual(ctrl.muted_session_count, 0)
 
     def test_audio_mute_unchecks_while_muted(self) -> None:
         chrome = FakeSession("chrome.exe", 101, muted=0)

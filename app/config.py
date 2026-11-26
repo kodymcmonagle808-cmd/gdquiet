@@ -42,6 +42,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "beta_updates": False,
     "level_detection_beta": False,
     "level_name_corrections": {},
+    "obs_overlay_enabled": False,
     "test_duration_s": 30.0,
 }
 

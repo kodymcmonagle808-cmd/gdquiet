@@ -242,6 +242,11 @@ class AudioMuteController:
         with self._lock:
             return self._is_muted
 
+    @property
+    def muted_session_count(self) -> int:
+        with self._lock:
+            return len(self._muted_sessions)
+
     def restore(self) -> None:
         """Unmute any audio sessions previously muted by this controller."""
         self.apply([], mute=False)
