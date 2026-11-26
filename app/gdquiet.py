@@ -2418,9 +2418,15 @@ class GDQuietApp:
                 webbrowser.open(info.release_url or RELEASES_PAGE_URL)
             return
 
+        is_inst = bool(getattr(info, "is_installer", False))
+        prompt_action = (
+            "Download and open the Setup Wizard now?"
+            if is_inst
+            else "Download and install now? GD Quiet will restart automatically."
+        )
         if not messagebox.askyesno(
             "Install Update",
-            f"GD Quiet v{info.latest_version} is available (you have v{info.current_version}).\n\nDownload and install now? GD Quiet will restart automatically.",
+            f"GD Quiet v{info.latest_version} is available (you have v{info.current_version}).\n\n{prompt_action}",
         ):
             return
 
@@ -2444,10 +2450,11 @@ class GDQuietApp:
 
                 staged = download_update(info, target_exe, progress_cb=on_prog)
                 try:
-                    self.root.after(0, lambda: self.update_btn.configure(text="Restarting..."))
+                    btn_msg = "Launching Setup..." if is_inst else "Restarting..."
+                    self.root.after(0, lambda msg=btn_msg: self.update_btn.configure(text=msg))
                 except Exception:
                     pass
-                launch_update_swap_and_restart(staged, target_exe)
+                launch_update_swap_and_restart(staged, target_exe, is_installer=is_inst)
                 self.root.after(0, self._finish_update_and_exit)
             except UpdateError as exc:
                 self.root.after(0, lambda err=str(exc): self._on_update_install_failed(err))

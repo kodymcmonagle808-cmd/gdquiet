@@ -46,9 +46,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: app
-          path: |
-            dist/GDQuiet-Setup.exe
-            dist/GDQuiet.exe
+          path: dist/GDQuiet-Setup.exe
 
   release:
     needs: [app]
@@ -60,14 +58,11 @@ jobs:
         with:
           merge-multiple: true
           path: out
-      - name: Upload release assets
+      - name: Upload GDQuiet-Setup.exe asset
         uses: softprops/action-gh-release@v2
         with:
           body: |
             ### Install GD Quiet
             Download and run **`GDQuiet-Setup.exe`** to open the Windows Setup Wizard (review and accept terms, choose your install location and shortcuts, then launch GD Quiet).
-
-            *(Existing v3.0.9+ installs can also update automatically in-app via `GDQuiet.exe`.)*
           files: |
             out/GDQuiet-Setup.exe
-            out/GDQuiet.exe

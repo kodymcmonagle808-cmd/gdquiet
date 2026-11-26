@@ -8,7 +8,7 @@ Standalone Windows app (`GDQuiet.exe`) that reads your level percentage directly
 - **Per-Window Mute Menu:** Pick exactly which open windows or audio apps get muted past your chosen percent, leaving manually muted apps untouched.
 - **Discord Auto-Deafen:** Record your Discord **Toggle Deafen** hotkey so Discord automatically deafens above your threshold and undeafens on death, exit, or 100%.
 - **Global % Checks Toggle Keybind:** Bind a global Windows keybind on **Overview** to pause or resume `%` watching and audio muting anytime, even while Geometry Dash is focused.
-- **Built-in Updater & % Position Picker:** Update `GDQuiet.exe` directly from the sidebar button without redownloading manually, or choose quick `%` presets (**Top Center**, **Top Left**, **Top Right**, **Bottom Center**) / drag a box anywhere on screen.
+- **Setup Wizard & Built-in Updater:** Distributed exclusively through `GDQuiet-Setup.exe` (accept terms, pick install folder/shortcuts), plus quick `%` position presets (**Top Center**, **Top Left**, **Top Right**, **Bottom Center**) and region box picker.
 
 ## Usage
 

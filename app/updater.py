@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-APP_VERSION = "3.1.0"
+APP_VERSION = "3.1.1"
 GITHUB_REPO = "kodymcmonagle808-cmd/gdquiet"
 RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 RELEASES_PAGE_URL = f"https://github.com/{GITHUB_REPO}/releases"
@@ -35,6 +35,7 @@ class UpdateInfo:
     size_bytes: int
     sha256: str
     release_notes: str
+    is_installer: bool = False
 
 
 def parse_version(version_str: str) -> tuple[int, ...]:
@@ -52,14 +53,27 @@ def is_newer_version(latest: str, current: str) -> bool:
     return tuple(a) > tuple(b)
 
 
+def _is_installer_asset_name(name: str) -> bool:
+    low = (name or "").lower()
+    return "setup" in low or "installer" in low
+
+
 def _select_exe_asset(assets: list[dict[str, object]]) -> dict[str, object] | None:
+    for asset in assets:
+        name = str(asset.get("name") or "").lower()
+        if name == "gdquiet-setup.exe":
+            return asset
+    for asset in assets:
+        name = str(asset.get("name") or "").lower()
+        if name.endswith(".exe") and _is_installer_asset_name(name):
+            return asset
     for asset in assets:
         name = str(asset.get("name") or "").lower()
         if name == "gdquiet.exe":
             return asset
     for asset in assets:
         name = str(asset.get("name") or "").lower()
-        if name.endswith(".exe") and "setup" not in name and "installer" not in name:
+        if name.endswith(".exe"):
             return asset
     return None
 
@@ -105,7 +119,7 @@ def check_for_update(
         )
 
     download_url = str(asset.get("browser_download_url") or "")
-    asset_name = str(asset.get("name") or "GDQuiet.exe")
+    asset_name = str(asset.get("name") or "GDQuiet-Setup.exe")
     size_bytes = int(asset.get("size") or 0)
     digest = str(asset.get("digest") or "").strip()
     sha256 = digest[7:].strip().lower() if digest.lower().startswith("sha256:") else ""
@@ -122,11 +136,14 @@ def check_for_update(
         size_bytes=size_bytes,
         sha256=sha256,
         release_notes=release_notes,
+        is_installer=_is_installer_asset_name(asset_name),
     )
 
 
-def _choose_staging_path(target_exe: Path, version_tag: str) -> Path:
+def _choose_staging_path(target_exe: Path, version_tag: str, is_installer: bool = False) -> Path:
     safe_ver = re.sub(r"[^0-9A-Za-z._-]", "_", version_tag or "latest")
+    if is_installer:
+        return Path(tempfile.gettempdir()) / f"GDQuiet-Setup-{safe_ver}.exe"
     candidate = target_exe.with_name(f".{target_exe.name}.{safe_ver}.update")
     try:
         candidate.parent.mkdir(parents=True, exist_ok=True)
@@ -156,7 +173,8 @@ def download_update(
     if not update.download_url.startswith("https://"):
         raise UpdateError("Invalid release download URL.")
 
-    staged = _choose_staging_path(target_exe, update.latest_version)
+    is_inst = bool(update.is_installer) or _is_installer_asset_name(update.asset_name)
+    staged = _choose_staging_path(target_exe, update.latest_version, is_installer=is_inst)
     req = urllib.request.Request(
         update.download_url,
         headers={"User-Agent": f"GDQuiet/{update.current_version}"},
@@ -202,23 +220,38 @@ def download_update(
         raise UpdateError(f"Download failed: {exc}") from exc
 
 
-def write_self_update_script(current_pid: int) -> Path:
+def write_self_update_script(current_pid: int, is_installer: bool = False) -> Path:
     script_path = Path(tempfile.gettempdir()) / f"gdquiet_self_update_{current_pid}.ps1"
-    content = "\n".join(
-        [
-            "param(",
-            "    [int]$TargetPid,",
-            "    [int]$ParentPid,",
-            "    [string]$Src,",
-            "    [string]$Dst,",
-            "    [string]$SelfScript",
-            ")",
-            "for ($i = 0; $i -lt 40; $i++) {",
-            "    $p1 = if ($TargetPid -gt 0) { Get-Process -Id $TargetPid -ErrorAction SilentlyContinue } else { $null }",
-            "    $p2 = if ($ParentPid -gt 0) { Get-Process -Id $ParentPid -ErrorAction SilentlyContinue } else { $null }",
-            "    if (-not $p1 -and -not $p2) { break }",
-            "    Start-Sleep -Milliseconds 250",
+    wait_loop = [
+        "param(",
+        "    [int]$TargetPid,",
+        "    [int]$ParentPid,",
+        "    [string]$Src,",
+        "    [string]$Dst,",
+        "    [string]$SelfScript",
+        ")",
+        "for ($i = 0; $i -lt 40; $i++) {",
+        "    $p1 = if ($TargetPid -gt 0) { Get-Process -Id $TargetPid -ErrorAction SilentlyContinue } else { $null }",
+        "    $p2 = if ($ParentPid -gt 0) { Get-Process -Id $ParentPid -ErrorAction SilentlyContinue } else { $null }",
+        "    if (-not $p1 -and -not $p2) { break }",
+        "    Start-Sleep -Milliseconds 250",
+        "}",
+    ]
+    if is_installer:
+        body = [
+            "Unblock-File -LiteralPath $Src -ErrorAction SilentlyContinue",
+            "$workDir = [System.IO.Path]::GetDirectoryName($Src)",
+            "if ($workDir) {",
+            "    Start-Process -FilePath $Src -WorkingDirectory $workDir -WindowStyle Normal -Wait",
+            "} else {",
+            "    Start-Process -FilePath $Src -WindowStyle Normal -Wait",
             "}",
+            "Remove-Item -LiteralPath $Src -Force -ErrorAction SilentlyContinue",
+            "Remove-Item -LiteralPath $SelfScript -Force -ErrorAction SilentlyContinue",
+            "",
+        ]
+    else:
+        body = [
             "$swapped = $false",
             "for ($j = 0; $j -lt 40; $j++) {",
             "    try {",
@@ -242,7 +275,7 @@ def write_self_update_script(current_pid: int) -> Path:
             "Remove-Item -LiteralPath $SelfScript -Force -ErrorAction SilentlyContinue",
             "",
         ]
-    )
+    content = "\n".join(wait_loop + body)
     with script_path.open("w", encoding="utf-8", newline="\n") as fh:
         fh.write(content)
     return script_path
@@ -266,10 +299,16 @@ def launch_update_swap_and_restart(
     staged_exe: Path,
     target_exe: Path,
     current_pid: int | None = None,
+    is_installer: bool | None = None,
 ) -> Path:
     pid = os.getpid() if current_pid is None else int(current_pid)
     parent_pid = _resolve_bootloader_parent_pid(target_exe)
-    script_path = write_self_update_script(pid)
+    use_installer = (
+        bool(is_installer)
+        if is_installer is not None
+        else _is_installer_asset_name(staged_exe.name)
+    )
+    script_path = write_self_update_script(pid, is_installer=use_installer)
     # Never combine CREATE_NO_WINDOW with DETACHED_PROCESS (causes immediate child exit on Windows).
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
         subprocess, "CREATE_NEW_PROCESS_GROUP", 0

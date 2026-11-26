@@ -491,16 +491,20 @@ class GDQuietTests(unittest.TestCase):
         self.assertFalse(updater.is_newer_version("v3.0.7", "3.0.7"))
         self.assertFalse(updater.is_newer_version("3.0.6", "3.0.7"))
 
-        # Installer EXEs must never be selected for binary self-update replacement
-        self.assertIsNone(updater._select_exe_asset([{"name": "GDQuiet-Setup.exe"}]))
+        # Setup Wizard asset should be selected cleanly and marked as an installer
+        only_setup = updater._select_exe_asset(
+            [{"name": "GDQuiet-Setup.exe", "browser_download_url": "https://example.com/setup.exe"}]
+        )
+        self.assertIsNotNone(only_setup)
+        self.assertEqual(only_setup["name"], "GDQuiet-Setup.exe")
         chosen = updater._select_exe_asset(
             [
-                {"name": "GDQuiet-Setup.exe", "browser_download_url": "https://example.com/setup.exe"},
                 {"name": "GDQuiet.exe", "browser_download_url": "https://example.com/GDQuiet.exe"},
+                {"name": "GDQuiet-Setup.exe", "browser_download_url": "https://example.com/setup.exe"},
             ]
         )
         self.assertIsNotNone(chosen)
-        self.assertEqual(chosen["name"], "GDQuiet.exe")
+        self.assertEqual(chosen["name"], "GDQuiet-Setup.exe")
 
         payload = b"MZ" + b"\x90" * 512
         sha = hashlib.sha256(payload).hexdigest()
@@ -511,8 +515,8 @@ class GDQuietTests(unittest.TestCase):
                 "body": "Test release",
                 "assets": [
                     {
-                        "name": "GDQuiet.exe",
-                        "browser_download_url": "https://github.com/kodymcmonagle808-cmd/gdquiet/releases/download/v9.9.9/GDQuiet.exe",
+                        "name": "GDQuiet-Setup.exe",
+                        "browser_download_url": "https://github.com/kodymcmonagle808-cmd/gdquiet/releases/download/v9.9.9/GDQuiet-Setup.exe",
                         "size": len(payload),
                         "digest": f"sha256:{sha}",
                     }
@@ -536,43 +540,54 @@ class GDQuietTests(unittest.TestCase):
         self.assertTrue(info.update_available)
         self.assertEqual(info.latest_version, "9.9.9")
         self.assertEqual(info.sha256, sha)
+        self.assertTrue(info.is_installer)
 
         with tempfile.TemporaryDirectory() as tmp:
             target_exe = Path(tmp) / "GDQuiet.exe"
             with patch("urllib.request.urlopen", return_value=FakeResp(payload)):
                 staged = updater.download_update(info, target_exe)
-            self.assertTrue(staged.is_file())
-            self.assertEqual(staged.read_bytes(), payload)
+            try:
+                self.assertTrue(staged.is_file())
+                self.assertEqual(staged.name, "GDQuiet-Setup-9.9.9.exe")
+                self.assertEqual(staged.read_bytes(), payload)
 
-            bad_info = updater.UpdateInfo(
-                current_version=info.current_version,
-                latest_version=info.latest_version,
-                tag_name=info.tag_name,
-                update_available=True,
-                download_url=info.download_url,
-                release_url=info.release_url,
-                asset_name=info.asset_name,
-                size_bytes=len(payload),
-                sha256="0" * 64,
-                release_notes="",
-            )
-            with patch("urllib.request.urlopen", return_value=FakeResp(payload)):
-                with self.assertRaises(updater.UpdateError):
-                    updater.download_update(bad_info, target_exe)
+                bad_info = updater.UpdateInfo(
+                    current_version=info.current_version,
+                    latest_version=info.latest_version,
+                    tag_name=info.tag_name,
+                    update_available=True,
+                    download_url=info.download_url,
+                    release_url=info.release_url,
+                    asset_name=info.asset_name,
+                    size_bytes=len(payload),
+                    sha256="0" * 64,
+                    release_notes="",
+                    is_installer=True,
+                )
+                with patch("urllib.request.urlopen", return_value=FakeResp(payload)):
+                    with self.assertRaises(updater.UpdateError):
+                        updater.download_update(bad_info, target_exe)
 
-            with patch("subprocess.Popen") as mock_popen:
-                script_path = updater.launch_update_swap_and_restart(staged, target_exe, current_pid=99999)
-                mock_popen.assert_called_once()
-                popen_cmd = mock_popen.call_args.args[0]
-                self.assertEqual(popen_cmd[0], "powershell.exe")
-                self.assertTrue(script_path.is_file())
-                self.assertEqual(script_path.suffix, ".ps1")
-                script_text = script_path.read_text(encoding="utf-8")
-                self.assertIn("Copy-Item", script_text)
-                self.assertIn("Start-Process", script_text)
-                script_path.unlink(missing_ok=True)
+                with patch("subprocess.Popen") as mock_popen:
+                    script_path = updater.launch_update_swap_and_restart(
+                        staged, target_exe, current_pid=99999, is_installer=True
+                    )
+                    mock_popen.assert_called_once()
+                    popen_cmd = mock_popen.call_args.args[0]
+                    self.assertEqual(popen_cmd[0], "powershell.exe")
+                    self.assertTrue(script_path.is_file())
+                    self.assertEqual(script_path.suffix, ".ps1")
+                    script_text = script_path.read_text(encoding="utf-8")
+                    self.assertIn("Start-Process", script_text)
+                    self.assertIn("-WindowStyle Normal -Wait", script_text)
+                    script_path.unlink(missing_ok=True)
+            finally:
+                staged.unlink(missing_ok=True)
+
+            stale = target_exe.with_name(".GDQuiet.exe.3.0.7.update")
+            stale.write_bytes(b"stale")
             updater.cleanup_stale_update_files(target_exe)
-            self.assertFalse(staged.exists())
+            self.assertFalse(stale.exists())
 
     def test_region_presets_and_capture_coords(self) -> None:
         import tkinter as tk
