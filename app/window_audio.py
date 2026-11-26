@@ -260,7 +260,7 @@ class AudioMuteController:
                 try:
                     sessions = AudioUtilities.GetAllSessions()
                 except Exception:
-                    sessions = []
+                    return
 
                 if mute:
                     self._is_muted = True

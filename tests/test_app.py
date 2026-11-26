@@ -184,6 +184,20 @@ class GDQuietTests(unittest.TestCase):
         self.assertEqual(deb.update(None, 50.0, True, now=2.2), (True, True))
         self.assertEqual(deb.update(None, 50.0, True, now=2.8), (False, False))
 
+    def test_percent_debouncer_keeps_threshold_confirmation_across_brief_ocr_gap(self) -> None:
+        deb = screen_reader.PercentStateDebouncer(missing_timeout_s=0.6)
+        self.assertEqual(deb.update(20.0, 50.0, True, now=1.0), (False, True))
+        self.assertEqual(deb.update(75.0, 50.0, True, now=1.1), (False, True))
+        self.assertEqual(deb.update(None, 50.0, True, now=1.2), (False, True))
+        self.assertEqual(deb.update(76.0, 50.0, True, now=1.3), (True, True))
+
+    def test_percent_debouncer_reports_unmuted_after_missing_timeout(self) -> None:
+        deb = screen_reader.PercentStateDebouncer(missing_timeout_s=0.6)
+        self.assertEqual(deb.update(20.0, 50.0, True, now=1.0), (False, True))
+        self.assertEqual(deb.update(51.0, 50.0, True, now=1.1), (False, True))
+        self.assertEqual(deb.update(52.0, 50.0, True, now=1.2), (True, True))
+        self.assertEqual(deb.update(None, 50.0, True, now=1.8), (False, False))
+
     def test_screen_test_session_records_milestones_and_finishes(self) -> None:
         sess = screen_reader.ScreenTestSession(duration_s=30.0)
         sess.start(now=100.0)
@@ -734,6 +748,23 @@ class GDQuietTests(unittest.TestCase):
         ctrl = window_audio.AudioMuteController()
         with patch.object(window_audio.AudioUtilities, "GetAllSessions", return_value=[fake_session]):
             ctrl.apply(["spotify.exe"], True)
+            self.assertEqual(fake_session.SimpleAudioVolume.muted, 1)
+            self.assertTrue(ctrl.is_muted)
+            ctrl.restore()
+            self.assertEqual(fake_session.SimpleAudioVolume.muted, 0)
+            self.assertFalse(ctrl.is_muted)
+
+    def test_audio_restore_keeps_tracking_when_session_enumeration_fails(self) -> None:
+        fake_session = FakeSession("spotify.exe", 111, muted=0, instance_id="inst1")
+        ctrl = window_audio.AudioMuteController()
+        with patch.object(window_audio.AudioUtilities, "GetAllSessions", return_value=[fake_session]):
+            ctrl.apply(["spotify.exe"], True)
+        with patch.object(
+            window_audio.AudioUtilities,
+            "GetAllSessions",
+            side_effect=[RuntimeError("WASAPI unavailable"), [fake_session]],
+        ):
+            ctrl.restore()
             self.assertEqual(fake_session.SimpleAudioVolume.muted, 1)
             self.assertTrue(ctrl.is_muted)
             ctrl.restore()
