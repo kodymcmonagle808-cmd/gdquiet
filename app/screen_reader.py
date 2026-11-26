@@ -610,6 +610,12 @@ class ScreenPercentWatcher:
                     unmute_100 = bool(cfg.get("unmute_at_100", True))
                     watch_mode = str(cfg.get("watch_mode") or "auto_window")
                     target_process = str(cfg.get("target_process") or "geometrydash.exe")
+                    self._debouncer.missing_timeout_s = max(
+                        0.05, min(5.0, float(cfg.get("missing_timeout_s", 0.35)))
+                    )
+                    play_wait_s = max(0.005, min(0.5, float(cfg.get("scan_interval_playing_ms", 15)) / 1000.0))
+                    idle_wait_s = max(0.01, min(1.0, float(cfg.get("scan_interval_idle_ms", 45)) / 1000.0))
+                    preview_interval_s = max(0.05, min(2.0, float(cfg.get("preview_interval_ms", 250)) / 1000.0))
                     target_key = (watch_mode, target_process)
                     if target_key != last_target_key:
                         last_target_key = target_key
@@ -703,7 +709,7 @@ class ScreenPercentWatcher:
 
                     now = time.monotonic()
                     preview: Image.Image | None = None
-                    if (now - last_preview_at) >= 0.25:
+                    if (now - last_preview_at) >= preview_interval_s:
                         last_preview_at = now
                         preview = img.copy()
 
@@ -726,6 +732,6 @@ class ScreenPercentWatcher:
                             scan_ms=scan_ms,
                         )
                     )
-                    self._stop.wait(0.015 if is_playing else 0.045)
+                    self._stop.wait(play_wait_s if is_playing else idle_wait_s)
         finally:
             ocr.close()

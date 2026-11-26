@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import atexit
 import ctypes
+import os
 from pathlib import Path
 import sys
 import threading
@@ -14,12 +15,13 @@ import webbrowser
 import mss
 from PIL import Image, ImageEnhance, ImageTk
 
-from config import load_config, save_config
+from config import DEFAULT_CONFIG, app_data_dir, config_path, load_config, save_config
 from discord_hotkey import DiscordDeafenController, GlobalHotkeyWatcher, parse_tk_hotkey, send_hotkey
 from screen_reader import (
     ScreenPercentWatcher,
     ScreenReading,
     ScreenTestSession,
+    WinRtPercentOcr,
     find_window_client_rect,
     get_virtual_screen_bounds,
 )
@@ -212,7 +214,9 @@ class GDQuietApp:
         self.cfg = load_config()
 
         self.audio_ctrl = AudioMuteController()
-        self.discord_ctrl = DiscordDeafenController()
+        self.discord_ctrl = DiscordDeafenController(
+            toggle_cooldown_s=float(self.cfg.get("discord_cooldown_ms", 180)) / 1000.0
+        )
         self.apply_lock = threading.Lock()
         self._apply_cond = threading.Condition()
         self._pending_mute: bool | None = None
@@ -222,7 +226,7 @@ class GDQuietApp:
         self._apply_thread.start()
         self.reading_lock = threading.Lock()
         self.test_lock = threading.RLock()
-        self.test_session = ScreenTestSession(duration_s=30.0)
+        self.test_session = ScreenTestSession(duration_s=float(self.cfg.get("test_duration_s", 30.0)))
 
         self.current_want_mute = False
         self.recording_hotkey = False
@@ -245,6 +249,7 @@ class GDQuietApp:
 
         self._setup_styles()
         self._build_ui()
+        self._apply_window_preferences()
         self._apply_watch_toggle_hotkey()
         self._show_page("dashboard")
         self._refresh_windows()
@@ -259,8 +264,10 @@ class GDQuietApp:
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         atexit.register(self._cleanup_sync)
         self._test_tick_id: str | None = self.root.after(150, self._test_ui_tick)
-        self._startup_update_id: str | None = self.root.after(
-            1500, lambda: self._check_updates_async(silent=True)
+        self._startup_update_id: str | None = (
+            self.root.after(1500, lambda: self._check_updates_async(silent=True))
+            if self.cfg.get("auto_check_updates", True)
+            else None
         )
         self._periodic_update_id: str | None = self.root.after(
             300000, self._schedule_periodic_update_check
@@ -472,6 +479,7 @@ class GDQuietApp:
             ("apps", "Apps to Mute"),
             ("discord", "Discord Auto-Deafen"),
             ("capture", "Screen Capture"),
+            ("settings", "Settings"),
         ]
         for key, label in nav_items:
             row = tk.Frame(nav_wrap, bg=COLORS["sidebar"])
@@ -594,6 +602,9 @@ class GDQuietApp:
         self._build_apps_page()
         self._build_discord_page()
         self._build_capture_page()
+        self._build_settings_page()
+
+        self.root.bind_all("<MouseWheel>", self._on_global_mousewheel)
 
         self._update_sidebar_badges()
         self._update_status_indicators()
@@ -1024,12 +1035,6 @@ class GDQuietApp:
 
         self.win_canvas.pack(side="left", fill="both", expand=True)
         self.win_scroll.pack(side="right", fill="y")
-        self.win_canvas.bind_all(
-            "<MouseWheel>",
-            lambda e: self.win_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
-            if self._active_page == "apps"
-            else None,
-        )
 
     def _build_discord_page(self) -> None:
         page = tk.Frame(self.main_area, bg=COLORS["bg"])
@@ -1466,6 +1471,343 @@ class GDQuietApp:
             font=("Segoe UI", 8),
         ).pack(anchor="w")
 
+    def _on_global_mousewheel(self, event: tk.Event) -> None:
+        delta = int(-1 * (event.delta / 120)) if event.delta else 0
+        if delta == 0:
+            return
+        if self._active_page == "apps" and hasattr(self, "win_canvas"):
+            self.win_canvas.yview_scroll(delta, "units")
+        elif self._active_page == "settings" and hasattr(self, "settings_canvas"):
+            self.settings_canvas.yview_scroll(delta, "units")
+
+    def _build_settings_page(self) -> None:
+        page = tk.Frame(self.main_area, bg=COLORS["bg"])
+        self._pages["settings"] = page
+
+        hdr = tk.Frame(page, bg=COLORS["bg"])
+        hdr.pack(fill="x", pady=(0, 10))
+        tk.Label(hdr, text="Settings", bg=COLORS["bg"], fg=COLORS["text"], font=("Segoe UI", 17, "bold")).pack(
+            anchor="w"
+        )
+        tk.Label(
+            hdr,
+            text="Configure muting behavior, OCR timing, Discord cooldowns, window preferences, and data.",
+            bg=COLORS["bg"],
+            fg=COLORS["subtext"],
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", pady=(2, 0))
+
+        scroll_wrap = tk.Frame(page, bg=COLORS["bg"])
+        scroll_wrap.pack(fill="both", expand=True)
+
+        self.settings_canvas = tk.Canvas(scroll_wrap, bg=COLORS["bg"], highlightthickness=0, bd=0)
+        settings_scroll = ttk.Scrollbar(scroll_wrap, orient="vertical", command=self.settings_canvas.yview)
+        self.settings_body = tk.Frame(self.settings_canvas, bg=COLORS["bg"])
+
+        self.settings_body.bind(
+            "<Configure>",
+            lambda _e: self.settings_canvas.configure(scrollregion=self.settings_canvas.bbox("all")),
+        )
+        self._settings_win_id = self.settings_canvas.create_window((0, 0), window=self.settings_body, anchor="nw")
+        self.settings_canvas.bind(
+            "<Configure>",
+            lambda e: self.settings_canvas.itemconfigure(self._settings_win_id, width=e.width),
+        )
+        self.settings_canvas.configure(yscrollcommand=settings_scroll.set)
+        self.settings_canvas.pack(side="left", fill="both", expand=True)
+        settings_scroll.pack(side="right", fill="y")
+
+        self._settings_num_vars: dict[str, tuple[tk.StringVar, float, float, bool]] = {}
+
+        def add_toggle(
+            parent: tk.Frame,
+            title: str,
+            desc: str,
+            var: tk.BooleanVar,
+            command: Callable[[], None],
+        ) -> None:
+            row = tk.Frame(parent, bg=COLORS["card"])
+            row.pack(fill="x", pady=4)
+            chk = tk.Checkbutton(
+                row,
+                text=title,
+                variable=var,
+                command=command,
+                bg=COLORS["card"],
+                fg=COLORS["text"],
+                selectcolor=COLORS["input"],
+                activebackground=COLORS["card"],
+                activeforeground=COLORS["text"],
+                font=("Segoe UI", 10, "bold"),
+                anchor="w",
+            )
+            chk.pack(anchor="w")
+            tk.Label(
+                row,
+                text=desc,
+                bg=COLORS["card"],
+                fg=COLORS["subtext"],
+                font=("Segoe UI", 8),
+                anchor="w",
+            ).pack(anchor="w", padx=(24, 0))
+
+        def add_number_row(
+            parent: tk.Frame,
+            key: str,
+            label: str,
+            unit: str,
+            min_v: float,
+            max_v: float,
+            is_int: bool = False,
+            on_apply: Callable[[float], None] | None = None,
+        ) -> None:
+            row = tk.Frame(parent, bg=COLORS["card"])
+            row.pack(fill="x", pady=4)
+            tk.Label(row, text=label, bg=COLORS["card"], fg=COLORS["text"], font=("Segoe UI", 9, "bold")).pack(
+                side="left"
+            )
+            val = self.cfg.get(key, DEFAULT_CONFIG[key])
+            sval = f"{int(round(float(val)))}" if is_int else f"{float(val):.2f}".rstrip("0").rstrip(".")
+            var = tk.StringVar(value=sval)
+            self._settings_num_vars[key] = (var, min_v, max_v, is_int)
+
+            right = tk.Frame(row, bg=COLORS["card"])
+            right.pack(side="right")
+            entry = tk.Entry(
+                right,
+                textvariable=var,
+                width=7,
+                bg=COLORS["input"],
+                fg=COLORS["text"],
+                insertbackground=COLORS["text"],
+                relief="flat",
+                font=("Consolas", 10, "bold"),
+                justify="center",
+            )
+            entry.pack(side="left", ipady=3, padx=(0, 6))
+            tk.Label(right, text=unit, bg=COLORS["card"], fg=COLORS["subtext"], font=("Segoe UI", 8), width=6, anchor="w").pack(
+                side="left", padx=(0, 6)
+            )
+
+            def apply_num(_e: Any = None) -> None:
+                try:
+                    parsed = float(var.get().strip())
+                except ValueError:
+                    messagebox.showwarning("Invalid Value", f"Enter a number between {min_v} and {max_v} for {label}.")
+                    return
+                clamped = max(min_v, min(max_v, parsed))
+                final_val: int | float = int(round(clamped)) if is_int else round(clamped, 3)
+                var.set(str(final_val))
+                with self.cfg_lock:
+                    self.cfg[key] = final_val
+                self._save_cfg()
+                if on_apply is not None:
+                    on_apply(float(final_val))
+
+            entry.bind("<Return>", apply_num)
+            self._make_button(right, "Apply", apply_num, bg=COLORS["card_alt"], padx=10, pady=3, font=("Segoe UI", 8, "bold")).pack(
+                side="left"
+            )
+
+        # Card 1: Trigger & Muting Behavior
+        c1 = self._make_card(self.settings_body, pady=12)
+        c1.pack(fill="x", pady=(0, 12))
+        tk.Label(c1, text="Trigger & Muting Behavior", bg=COLORS["card"], fg=COLORS["cyan"], font=("Segoe UI", 11, "bold")).pack(
+            anchor="w", pady=(0, 6)
+        )
+        add_number_row(
+            c1,
+            "mute_at_percent",
+            "Mute Threshold Percent",
+            "% (0-100)",
+            0.0,
+            100.0,
+            is_int=False,
+            on_apply=self._on_settings_percent_applied,
+        )
+        add_number_row(
+            c1,
+            "missing_timeout_s",
+            "Unmute Delay After % Disappears (Death / Exit)",
+            "sec",
+            0.05,
+            5.0,
+            is_int=False,
+        )
+        add_number_row(
+            c1,
+            "remute_interval_s",
+            "Re-Enforce Mute Interval (New Audio Streams)",
+            "sec",
+            0.1,
+            5.0,
+            is_int=False,
+        )
+        add_toggle(
+            c1,
+            "Unmute & Undeafen at 100% (Level Complete)",
+            "Automatically restore audio and Discord when reaching 100%.",
+            self.unmute_100_var,
+            self._on_toggle_unmute_100,
+        )
+        add_toggle(
+            c1,
+            "Show Background Audio Processes",
+            "Include apps without visible windows in the Apps to Mute list.",
+            self.bg_audio_var,
+            self._on_toggle_bg_audio,
+        )
+        self.sound_feedback_var = tk.BooleanVar(value=bool(self.cfg.get("sound_feedback", False)))
+        add_toggle(
+            c1,
+            "Play Sound Chime on Mute / Unmute",
+            "Plays a subtle Windows notification sound whenever GD Quiet mutes or unmutes.",
+            self.sound_feedback_var,
+            self._on_toggle_sound_feedback,
+        )
+
+        # Card 2: OCR & Screen Capture
+        c2 = self._make_card(self.settings_body, pady=12)
+        c2.pack(fill="x", pady=(0, 12))
+        tk.Label(c2, text="OCR & Screen Capture", bg=COLORS["card"], fg=COLORS["cyan"], font=("Segoe UI", 11, "bold")).pack(
+            anchor="w", pady=(0, 6)
+        )
+        self.settings_watch_enabled_var = tk.BooleanVar(value=bool(self.cfg.get("watch_enabled", True)))
+        add_toggle(
+            c2,
+            "Enable Screen % Watching",
+            "Master toggle for capturing the screen and muting apps automatically.",
+            self.settings_watch_enabled_var,
+            self._on_settings_watch_toggle,
+        )
+        add_number_row(
+            c2,
+            "scan_interval_playing_ms",
+            "Scan Interval While Playing",
+            "ms",
+            5.0,
+            500.0,
+            is_int=True,
+        )
+        add_number_row(
+            c2,
+            "scan_interval_idle_ms",
+            "Scan Interval in Menus / Idle",
+            "ms",
+            10.0,
+            1000.0,
+            is_int=True,
+        )
+        add_number_row(
+            c2,
+            "preview_interval_ms",
+            "Live Capture Preview Refresh Interval",
+            "ms",
+            50.0,
+            2000.0,
+            is_int=True,
+        )
+        add_number_row(
+            c2,
+            "test_duration_s",
+            "Screen Test Duration",
+            "sec",
+            5.0,
+            120.0,
+            is_int=True,
+            on_apply=self._on_settings_test_duration_applied,
+        )
+
+        # Card 3: Discord & Hotkeys
+        c3 = self._make_card(self.settings_body, pady=12)
+        c3.pack(fill="x", pady=(0, 12))
+        tk.Label(c3, text="Discord & Hotkeys", bg=COLORS["card"], fg=COLORS["cyan"], font=("Segoe UI", 11, "bold")).pack(
+            anchor="w", pady=(0, 6)
+        )
+        add_toggle(
+            c3,
+            "Enable Discord Auto-Deafen",
+            "Send your Discord Toggle Deafen keybind when crossing the mute threshold.",
+            self.auto_deafen_var,
+            self._on_toggle_auto_deafen,
+        )
+        add_number_row(
+            c3,
+            "discord_cooldown_ms",
+            "Discord Hotkey Toggle Cooldown",
+            "ms",
+            0.0,
+            2000.0,
+            is_int=True,
+            on_apply=lambda v: self.discord_ctrl.set_cooldown_ms(v),
+        )
+
+        # Card 4: Window & Updates
+        c4 = self._make_card(self.settings_body, pady=12)
+        c4.pack(fill="x", pady=(0, 12))
+        tk.Label(c4, text="Window & Updates", bg=COLORS["card"], fg=COLORS["cyan"], font=("Segoe UI", 11, "bold")).pack(
+            anchor="w", pady=(0, 6)
+        )
+        self.always_on_top_var = tk.BooleanVar(value=bool(self.cfg.get("always_on_top", False)))
+        add_toggle(
+            c4,
+            "Always on Top",
+            "Keep the GD Quiet window floating above other windows.",
+            self.always_on_top_var,
+            self._on_toggle_always_on_top,
+        )
+        self.start_minimized_var = tk.BooleanVar(value=bool(self.cfg.get("start_minimized", False)))
+        add_toggle(
+            c4,
+            "Start Minimized",
+            "Minimize GD Quiet to the taskbar automatically when launched.",
+            self.start_minimized_var,
+            self._on_toggle_start_minimized,
+        )
+        self.auto_updates_var = tk.BooleanVar(value=bool(self.cfg.get("auto_check_updates", True)))
+        add_toggle(
+            c4,
+            "Automatically Check for Updates",
+            "Check GitHub Releases on startup and every 5 minutes for GDQuiet-Setup.exe updates.",
+            self.auto_updates_var,
+            self._on_toggle_auto_updates,
+        )
+
+        # Card 5: Config & Data
+        c5 = self._make_card(self.settings_body, pady=12)
+        c5.pack(fill="x", pady=(0, 12))
+        tk.Label(c5, text="Config & Data", bg=COLORS["card"], fg=COLORS["cyan"], font=("Segoe UI", 11, "bold")).pack(
+            anchor="w", pady=(0, 6)
+        )
+        tk.Label(
+            c5,
+            text=f"Config file: {config_path()}",
+            bg=COLORS["card"],
+            fg=COLORS["subtext"],
+            font=("Consolas", 8),
+        ).pack(anchor="w", pady=(0, 8))
+        btn_row = tk.Frame(c5, bg=COLORS["card"])
+        btn_row.pack(fill="x")
+        self._make_button(
+            btn_row,
+            "Open Config Folder",
+            self._open_config_folder,
+            bg=COLORS["card_alt"],
+            padx=12,
+            pady=6,
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side="left", padx=(0, 8))
+        self._make_button(
+            btn_row,
+            "Reset All Settings to Defaults",
+            self._on_reset_defaults,
+            bg=COLORS["red_bg"],
+            hover_bg=COLORS["red"],
+            padx=12,
+            pady=6,
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side="left")
+
     # ---- 30-Second Screen Test Logic ----
 
     def _toggle_screen_test(self) -> None:
@@ -1710,12 +2052,114 @@ class GDQuietApp:
             self.cfg["watch_enabled"] = new_val
         self._save_cfg()
 
+        if hasattr(self, "settings_watch_enabled_var"):
+            self.settings_watch_enabled_var.set(new_val)
         self.watch_toggle_btn.configure(text=self._watch_toggle_btn_text())
         if not new_val:
             watcher = getattr(self, "watcher", None)
             if watcher is not None and hasattr(watcher, "_debouncer"):
                 watcher._debouncer.reset()
             self._apply_mute_state(False)
+        self._update_status_indicators()
+
+    def _apply_window_preferences(self) -> None:
+        try:
+            self.root.attributes("-topmost", bool(self.cfg.get("always_on_top", False)))
+        except Exception:
+            pass
+        if self.cfg.get("start_minimized", False):
+            try:
+                self.root.iconify()
+            except Exception:
+                pass
+
+    def _on_settings_percent_applied(self, pct: float) -> None:
+        self.percent_var.set(pct)
+        self.percent_entry_var.set(f"{pct:.0f}")
+        self._update_sidebar_badges()
+
+    def _on_settings_test_duration_applied(self, dur: float) -> None:
+        with self.test_lock:
+            self.test_session.duration_s = dur
+        if hasattr(self, "test_timer_lbl") and not self.test_session.active:
+            self.test_timer_lbl.configure(text=f"Ready ({int(round(dur))}s)")
+
+    def _on_settings_watch_toggle(self) -> None:
+        desired = bool(self.settings_watch_enabled_var.get())
+        if desired != bool(self.cfg.get("watch_enabled", True)):
+            self._toggle_watching()
+
+    def _on_toggle_sound_feedback(self) -> None:
+        with self.cfg_lock:
+            self.cfg["sound_feedback"] = bool(self.sound_feedback_var.get())
+        self._save_cfg()
+
+    def _on_toggle_always_on_top(self) -> None:
+        val = bool(self.always_on_top_var.get())
+        with self.cfg_lock:
+            self.cfg["always_on_top"] = val
+        self._save_cfg()
+        try:
+            self.root.attributes("-topmost", val)
+        except Exception:
+            pass
+
+    def _on_toggle_start_minimized(self) -> None:
+        with self.cfg_lock:
+            self.cfg["start_minimized"] = bool(self.start_minimized_var.get())
+        self._save_cfg()
+
+    def _on_toggle_auto_updates(self) -> None:
+        with self.cfg_lock:
+            self.cfg["auto_check_updates"] = bool(self.auto_updates_var.get())
+        self._save_cfg()
+
+    def _open_config_folder(self) -> None:
+        try:
+            os.startfile(str(app_data_dir()))  # type: ignore[attr-defined]
+        except Exception as exc:
+            messagebox.showerror("Open Folder Failed", str(exc))
+
+    def _on_reset_defaults(self) -> None:
+        if not messagebox.askyesno(
+            "Reset All Settings",
+            "Reset all GD Quiet settings to their default values?",
+        ):
+            return
+        with self.cfg_lock:
+            self.cfg = dict(DEFAULT_CONFIG)
+        self._save_cfg()
+
+        pct = float(self.cfg["mute_at_percent"])
+        self.percent_var.set(pct)
+        self.percent_entry_var.set(f"{pct:.0f}")
+        self.unmute_100_var.set(bool(self.cfg["unmute_at_100"]))
+        self.bg_audio_var.set(bool(self.cfg["show_background_audio"]))
+        self.auto_deafen_var.set(bool(self.cfg["auto_deafen"]))
+        self.hotkey_var.set("Not set")
+        self.target_proc_var.set(str(self.cfg["target_process"]))
+        self.region_mode_label.configure(text=self._describe_region_mode())
+        self.settings_watch_enabled_var.set(bool(self.cfg["watch_enabled"]))
+        self.sound_feedback_var.set(bool(self.cfg["sound_feedback"]))
+        self.always_on_top_var.set(bool(self.cfg["always_on_top"]))
+        self.start_minimized_var.set(bool(self.cfg["start_minimized"]))
+        self.auto_updates_var.set(bool(self.cfg["auto_check_updates"]))
+        for key, (var, _mn, _mx, is_int) in self._settings_num_vars.items():
+            val = self.cfg.get(key, DEFAULT_CONFIG[key])
+            sval = f"{int(round(float(val)))}" if is_int else f"{float(val):.2f}".rstrip("0").rstrip(".")
+            var.set(sval)
+
+        self.discord_ctrl.set_cooldown_ms(float(self.cfg["discord_cooldown_ms"]))
+        with self.test_lock:
+            self.test_session.duration_s = float(self.cfg["test_duration_s"])
+        try:
+            self.root.attributes("-topmost", False)
+        except Exception:
+            pass
+        self._apply_watch_toggle_hotkey()
+        self._force_restore_all()
+        self._refresh_windows()
+        self._update_sidebar_badges()
         self._update_status_indicators()
 
     def _refresh_target_windows(self) -> None:
@@ -1858,6 +2302,8 @@ class GDQuietApp:
 
         with self.cfg_lock:
             watch_enabled = bool(self.cfg.get("watch_enabled", True))
+            remute_interval_s = max(0.1, min(5.0, float(self.cfg.get("remute_interval_s", 0.4))))
+            sound_feedback = bool(self.cfg.get("sound_feedback", False))
         effective_mute = False if (testing or not watch_enabled) else reading.should_mute
         now_m = time.monotonic()
         if effective_mute != self.current_want_mute:
@@ -1865,7 +2311,12 @@ class GDQuietApp:
             if effective_mute:
                 self._last_audio_enforce_at = now_m
             self._apply_mute_state(effective_mute)
-        elif effective_mute and (now_m - self._last_audio_enforce_at) >= 0.4:
+            if sound_feedback:
+                try:
+                    ctypes.windll.user32.MessageBeep(0x00000040 if effective_mute else 0x0)
+                except Exception:
+                    pass
+        elif effective_mute and (now_m - self._last_audio_enforce_at) >= remute_interval_s:
             # Periodically re-mute so newly opened Chrome/browser audio streams stay muted.
             self._last_audio_enforce_at = now_m
             self._apply_mute_state(True, force_reapply=True)
@@ -2024,6 +2475,8 @@ class GDQuietApp:
         with self.cfg_lock:
             self.cfg["mute_at_percent"] = pct
         self._save_cfg()
+        if hasattr(self, "_settings_num_vars") and "mute_at_percent" in self._settings_num_vars:
+            self._settings_num_vars["mute_at_percent"][0].set(f"{pct:.0f}")
         self._update_sidebar_badges()
 
     def _apply_worker(self) -> None:
@@ -2341,7 +2794,7 @@ class GDQuietApp:
     def _schedule_periodic_update_check(self) -> None:
         if self._closing:
             return
-        if not self._updating:
+        if not self._updating and self.cfg.get("auto_check_updates", True):
             self._check_updates_async(silent=True)
         if not self._closing:
             self._periodic_update_id = self.root.after(300000, self._schedule_periodic_update_check)
@@ -2510,8 +2963,6 @@ class GDQuietApp:
 
 def main() -> None:
     if "--self-check" in sys.argv:
-        from screen_reader import WinRtPercentOcr
-
         ocr = WinRtPercentOcr()
         try:
             assert ocr.available(), "Windows.Media.Ocr engine unavailable"

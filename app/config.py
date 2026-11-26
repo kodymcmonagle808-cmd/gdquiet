@@ -29,6 +29,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "target_process": "geometrydash.exe",
     "custom_region": None,
     "unmute_at_100": True,
+    "missing_timeout_s": 0.35,
+    "remute_interval_s": 0.40,
+    "scan_interval_playing_ms": 15,
+    "scan_interval_idle_ms": 45,
+    "preview_interval_ms": 250,
+    "discord_cooldown_ms": 180,
+    "sound_feedback": False,
+    "always_on_top": False,
+    "start_minimized": False,
+    "auto_check_updates": True,
+    "test_duration_s": 30.0,
 }
 
 

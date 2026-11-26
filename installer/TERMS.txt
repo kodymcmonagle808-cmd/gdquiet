@@ -1,30 +1,111 @@
-GD QUIET - SOFTWARE LICENSE & TERMS OF USE
+GD QUIET — SOFTWARE LICENSE AGREEMENT & TERMS OF USE
+================================================================================
 
-Please read these terms carefully before installing and using GD Quiet.
+Please read these terms carefully before installing, launching, or using
+GD Quiet ("the Software"). By clicking "I accept the agreement" and proceeding
+with installation, you acknowledge that you have read, understood, and agreed
+to be bound by all terms below.
+
 
 1. LICENSE GRANT (MIT LICENSE)
-GD Quiet is open-source software licensed under the MIT License.
-You are free to install, use, copy, modify, and distribute this software
-for personal or community use in accordance with these terms.
+--------------------------------------------------------------------------------
+GD Quiet is free, open-source software licensed under the MIT License.
+Copyright (c) Kody McMonagle and contributors.
 
-2. HOW GD QUIET WORKS
-GD Quiet runs locally on your Windows PC and reads only the configured
-screen region (or Geometry Dash window percentage) using Windows OCR to:
-  - Mute or unmute the background Windows apps you explicitly choose.
-  - Optionally send your configured Discord "Toggle Deafen" hotkey.
-All percentage detection, audio control, and configuration happen locally
-on your device. No gameplay footage or personal audio is uploaded.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files, to deal in the Software
+without restriction, including without limitation the rights to use, copy,
+modify, merge, publish, distribute, sublicense, and/or sell copies of the
+Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
 
-3. USER RESPONSIBILITY
-You are responsible for configuring your mute threshold, target apps,
-screen capture region, and Discord hotkeys appropriately before using GD Quiet.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-4. DISCLAIMER OF WARRANTY & LIMITATION OF LIABILITY
+
+2. HOW GD QUIET WORKS & LOCAL-ONLY PROCESSING
+--------------------------------------------------------------------------------
+GD Quiet is a standalone Windows desktop utility designed to reduce background
+distractions while playing Geometry Dash. When active, the Software:
+  (a) Captures only the configured target window band (default: top 10% of
+      GeometryDash.exe) or a user-selected screen region using Windows screen
+      capture APIs.
+  (b) Runs local Windows Optical Character Recognition (Windows.Media.Ocr)
+      in memory to detect your current level percentage.
+  (c) Uses the Windows Core Audio Session API (WASAPI) to mute and unmute only
+      the specific Windows applications you explicitly select.
+  (d) Optionally sends your configured keyboard shortcut ("Toggle Deafen")
+      to Discord when your percentage crosses your chosen threshold, and sends
+      it again to undeafen upon death, level exit, or 100% completion.
+
+All screen capture, OCR text recognition, audio session control, and settings
+storage occur 100% locally on your Windows PC.
+
+
+3. PRIVACY & ZERO-TELEMETRY GUARANTEE
+--------------------------------------------------------------------------------
+GD Quiet does NOT collect, log, store, transmit, or sell:
+  - Gameplay video, screenshots, or OCR text outside volatile RAM;
+  - Audio streams, microphone input, or Discord voice/chat data;
+  - Personal identifiers, account tokens, analytics, or crash telemetry.
+
+Your preferences are stored solely in your local Windows AppData folder
+(%APPDATA%\GDQuiet\config.json) and can be deleted or reset at any time.
+
+
+4. NETWORK ACCESS & AUTOMATIC UPDATE CHECKS
+--------------------------------------------------------------------------------
+The only outbound network requests made by GD Quiet are optional read-only
+checks against the official GitHub Releases API for this repository to verify
+whether a newer version of GDQuiet-Setup.exe is available. You may disable
+automatic update checks at any time from the in-app Settings tab. When you
+choose to install an update, GD Quiet verifies file size and SHA-256 checksum
+before launching the signed/packaged Setup Wizard.
+
+
+5. USER RESPONSIBILITY & SYSTEM CONFIGURATION
+--------------------------------------------------------------------------------
+You are solely responsible for:
+  - Selecting which applications GD Quiet is permitted to mute;
+  - Configuring your Discord Toggle Deafen keybind and mute threshold safely;
+  - Verifying that Geometry Dash is running in Windowed or Borderless mode
+    with "Show Percentage" enabled (or configuring a custom screen region);
+  - Ensuring that automated keybinds do not conflict with other software.
+
+Always test your configuration using the built-in 30-second Screen Test or
+the "Unmute & Undeafen All" safety button if you notice unexpected audio state.
+
+
+6. DISCLAIMER OF WARRANTIES
+--------------------------------------------------------------------------------
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
-LIABILITY ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE
-OF THIS SOFTWARE.
+FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT. THE AUTHORS DO
+NOT WARRANT THAT OCR DETECTION, AUDIO SESSION CONTROL, OR HOTKEY DISPATCH WILL
+BE UNINTERRUPTED OR ERROR-FREE ACROSS ALL WINDOWS VERSIONS, DRIVERS, OR GAME
+MODS.
 
-Click "I accept the agreement" below to continue installing GD Quiet.
+
+7. LIMITATION OF LIABILITY
+--------------------------------------------------------------------------------
+IN NO EVENT SHALL THE AUTHORS, CONTRIBUTORS, OR COPYRIGHT HOLDERS BE LIABLE FOR
+ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT,
+OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE
+OR OTHER DEALINGS IN THE SOFTWARE, INCLUDING BUT NOT LIMITED TO MISSED AUDIO,
+ACCIDENTAL MUTING/DEAFENING, OR LOSS OF GAMEPLAY PROGRESS.
+
+
+8. TERMINATION & UNINSTALLATION
+--------------------------------------------------------------------------------
+This agreement remains effective until terminated. You may terminate it at any
+time by uninstalling GD Quiet via Windows Settings / Apps & Features or the
+included uninstaller, and optionally removing %APPDATA%\GDQuiet.
+
+
+9. SOURCE CODE & SUPPORT
+--------------------------------------------------------------------------------
+Official source code, issue tracker, and releases are hosted at:
+  https://github.com/kodymcmonagle808-cmd/gdquiet
+
+By clicking "I accept the agreement" below, you confirm that you accept these
+terms and wish to install GD Quiet.

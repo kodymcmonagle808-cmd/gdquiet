@@ -718,12 +718,32 @@ class GDQuietTests(unittest.TestCase):
                 app = gdquiet.GDQuietApp(root)
                 self.assertIsNotNone(app._sidebar_logo_photo)
                 self.assertIsNotNone(app._window_icon_photo)
+                self.assertIn("settings", app._pages)
+                self.assertIn("settings", app._nav_buttons)
+                app._show_page("settings")
+                self.assertEqual(app._active_page, "settings")
                 app._on_close()
         finally:
             try:
                 root.destroy()
             except Exception:
                 pass
+
+    def test_audio_restore_and_expanded_terms(self) -> None:
+        fake_session = FakeSession("spotify.exe", 111, muted=0, instance_id="inst1")
+        ctrl = window_audio.AudioMuteController()
+        with patch.object(window_audio.AudioUtilities, "GetAllSessions", return_value=[fake_session]):
+            ctrl.apply(["spotify.exe"], True)
+            self.assertEqual(fake_session.SimpleAudioVolume.muted, 1)
+            self.assertTrue(ctrl.is_muted)
+            ctrl.restore()
+            self.assertEqual(fake_session.SimpleAudioVolume.muted, 0)
+            self.assertFalse(ctrl.is_muted)
+
+        terms_path = Path(__file__).resolve().parent.parent / "installer" / "TERMS.txt"
+        self.assertTrue(terms_path.is_file())
+        terms_text = terms_path.read_text(encoding="utf-8")
+        self.assertGreater(len(terms_text), 3000)
 
 
 if __name__ == "__main__":

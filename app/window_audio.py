@@ -242,6 +242,10 @@ class AudioMuteController:
         with self._lock:
             return self._is_muted
 
+    def restore(self) -> None:
+        """Unmute any audio sessions previously muted by this controller."""
+        self.apply([], mute=False)
+
     @staticmethod
     def _session_key(session: Any, proc_name: str, pid: int) -> tuple[str, int, str]:
         inst_id = str(getattr(session, "InstanceIdentifier", "") or "")

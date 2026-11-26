@@ -231,6 +231,10 @@ class DiscordDeafenController:
         with self._lock:
             return self._deafened_by_us
 
+    def set_cooldown_ms(self, cooldown_ms: int | float) -> None:
+        with self._lock:
+            self._toggle_cooldown_s = max(0.0, min(2.0, float(cooldown_ms) / 1000.0))
+
     def _send_with_cooldown(self, hotkey: dict[str, Any]) -> bool:
         if self._last_toggle_at > 0.0 and self._toggle_cooldown_s > 0.0:
             remaining = self._toggle_cooldown_s - (time.monotonic() - self._last_toggle_at)

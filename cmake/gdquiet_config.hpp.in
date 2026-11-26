@@ -1,5 +1,0 @@
-#pragma once
-
-// Auto-generated at configure time from CMake / GitHub Actions secrets.
-inline constexpr char const* GDQUIET_BAKED_SUPABASE_URL = "@GDQUIET_SUPABASE_URL_ESCAPED@";
-inline constexpr char const* GDQUIET_BAKED_SUPABASE_ANON_KEY = "@GDQUIET_SUPABASE_ANON_KEY_ESCAPED@";
