@@ -59,17 +59,17 @@ PERCENT_PRESETS: tuple[tuple[str, float, float, float, float], ...] = (
 
 
 COLORS = {
-    "bg": "#0b0f17",
-    "sidebar": "#101622",
-    "card": "#161e2e",
-    "card_alt": "#1d283c",
-    "hover": "#233048",
-    "border": "#26334d",
-    "input": "#0c111b",
+    "bg": "#090d16",
+    "sidebar": "#0e1422",
+    "card": "#141c2e",
+    "card_alt": "#1b263d",
+    "hover": "#24324f",
+    "border": "#253352",
+    "input": "#0b101b",
     "text": "#f8fafc",
     "subtext": "#94a3b8",
-    "accent": "#5865f2",
-    "accent_hover": "#4752c4",
+    "accent": "#6366f1",
+    "accent_hover": "#4f46e5",
     "cyan": "#38bdf8",
     "cyan_dark": "#0284c7",
     "green": "#22c55e",
@@ -203,8 +203,8 @@ class GDQuietApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("GD Quiet")
-        self.root.geometry("940x650")
-        self.root.minsize(860, 590)
+        self.root.geometry("980x680")
+        self.root.minsize(880, 610)
         self.root.configure(bg=COLORS["bg"])
         self._window_icon_photo: ImageTk.PhotoImage | None = None
         self._sidebar_logo_photo: ImageTk.PhotoImage | None = None
@@ -287,11 +287,20 @@ class GDQuietApp:
         style = ttk.Style(self.root)
         style.theme_use("clam")
         style.configure(
-            "TScrollbar",
+            "Vertical.TScrollbar",
+            gripcount=0,
             background=COLORS["card_alt"],
+            darkcolor=COLORS["card_alt"],
+            lightcolor=COLORS["card_alt"],
             troughcolor=COLORS["input"],
-            bordercolor=COLORS["input"],
+            bordercolor=COLORS["bg"],
             arrowcolor=COLORS["subtext"],
+            relief="flat",
+        )
+        style.map(
+            "Vertical.TScrollbar",
+            background=[("active", COLORS["hover"]), ("pressed", COLORS["cyan_dark"])],
+            arrowcolor=[("active", COLORS["text"])],
         )
         style.configure(
             "Dark.TCombobox",
@@ -299,6 +308,16 @@ class GDQuietApp:
             background=COLORS["card_alt"],
             foreground=COLORS["text"],
             arrowcolor=COLORS["text"],
+            bordercolor=COLORS["border"],
+            lightcolor=COLORS["input"],
+            darkcolor=COLORS["input"],
+        )
+        style.map(
+            "Dark.TCombobox",
+            fieldbackground=[("readonly", COLORS["input"])],
+            selectbackground=[("readonly", COLORS["card_alt"])],
+            selectforeground=[("readonly", COLORS["text"])],
+            foreground=[("readonly", COLORS["text"])],
         )
 
     def _make_button(
@@ -378,29 +397,27 @@ class GDQuietApp:
         if logo_path.is_file():
             try:
                 with Image.open(logo_path) as img:
-                    badge = img.convert("RGBA").resize((38, 38), Image.Resampling.LANCZOS)
+                    badge = img.convert("RGBA").resize((42, 42), Image.Resampling.LANCZOS)
                 self._sidebar_logo_photo = ImageTk.PhotoImage(badge)
-                canvas.create_image(19, 19, image=self._sidebar_logo_photo)
+                canvas.create_image(21, 21, image=self._sidebar_logo_photo)
                 return
             except Exception:
                 pass
-        canvas.create_rectangle(2, 2, 36, 36, fill=COLORS["accent"], outline="#818cf8", width=1)
-        canvas.create_rectangle(9, 14, 15, 24, fill="#f8fafc", outline="")
-        canvas.create_polygon(15, 14, 24, 8, 24, 30, 15, 24, fill="#f8fafc", outline="")
-        canvas.create_line(9, 9, 29, 29, fill=COLORS["red"], width=3, capstyle="round")
+        canvas.create_rectangle(2, 2, 40, 40, fill=COLORS["accent"], outline="#818cf8", width=1)
+        canvas.create_line(11, 31, 31, 11, fill="#f8fafc", width=3, capstyle="round")
 
     def _build_ui(self) -> None:
         shell = tk.Frame(self.root, bg=COLORS["bg"])
         shell.pack(fill="both", expand=True)
 
         # Left Sidebar
-        sidebar = tk.Frame(shell, bg=COLORS["sidebar"], width=232, padx=14, pady=16)
+        sidebar = tk.Frame(shell, bg=COLORS["sidebar"], width=242, padx=14, pady=16)
         sidebar.pack(side="left", fill="y")
         sidebar.pack_propagate(False)
 
         brand = tk.Frame(sidebar, bg=COLORS["sidebar"])
         brand.pack(fill="x", pady=(0, 16))
-        logo_cv = tk.Canvas(brand, width=38, height=38, bg=COLORS["sidebar"], highlightthickness=0)
+        logo_cv = tk.Canvas(brand, width=42, height=42, bg=COLORS["sidebar"], highlightthickness=0)
         logo_cv.pack(side="left", padx=(0, 10))
         self._draw_logo(logo_cv)
 
@@ -450,7 +467,15 @@ class GDQuietApp:
             fg=COLORS["text"],
             font=("Consolas", 22, "bold"),
         )
-        self.sidebar_pct_lbl.pack(anchor="w", pady=(4, 0))
+        self.sidebar_pct_lbl.pack(anchor="w", pady=(4, 4))
+
+        self.sidebar_pct_bar = tk.Canvas(
+            status_box,
+            height=6,
+            bg=COLORS["input"],
+            highlightthickness=0,
+        )
+        self.sidebar_pct_bar.pack(fill="x", pady=(0, 6))
 
         self.sidebar_thresh_lbl = tk.Label(
             status_box,
@@ -503,6 +528,24 @@ class GDQuietApp:
                 pady=9,
             )
             btn.pack(side="left", fill="x", expand=True)
+            btn.bind(
+                "<Enter>",
+                lambda _e, k=key, r=row, b=btn: (
+                    r.configure(bg=COLORS["card_alt"]),
+                    b.configure(bg=COLORS["card_alt"], fg=COLORS["text"]),
+                )
+                if self._active_page != k
+                else None,
+            )
+            btn.bind(
+                "<Leave>",
+                lambda _e, k=key, r=row, b=btn: (
+                    r.configure(bg=COLORS["sidebar"]),
+                    b.configure(bg=COLORS["sidebar"], fg=COLORS["subtext"]),
+                )
+                if self._active_page != k
+                else None,
+            )
             self._nav_buttons[key] = (row, indicator, btn)
 
         # Sidebar bottom controls
@@ -2342,6 +2385,7 @@ class GDQuietApp:
 
         if reading.percent is not None:
             self.sidebar_pct_lbl.configure(text=f"{reading.percent:.1f}%")
+            self._draw_sidebar_pct_bar(reading.percent, reading.should_mute)
             ms_part = f"  •  {reading.scan_ms:.0f}ms" if reading.scan_ms > 0 else ""
             self.detected_pct_label.configure(
                 text=f"Detected: {reading.percent:.2f}%{ms_part}   (OCR: {reading.raw_text!r})",
@@ -2349,6 +2393,7 @@ class GDQuietApp:
             )
         else:
             self.sidebar_pct_lbl.configure(text="--%")
+            self._draw_sidebar_pct_bar(None, False)
             self.detected_pct_label.configure(text="Detected: --%", fg=COLORS["text"])
 
         self.watch_status_label.configure(text=reading.status_text)
@@ -2363,6 +2408,26 @@ class GDQuietApp:
                 width=thumb.width,
                 height=thumb.height,
             )
+
+    def _draw_sidebar_pct_bar(self, percent: float | None, muted: bool) -> None:
+        bar = getattr(self, "sidebar_pct_bar", None)
+        if bar is None:
+            return
+        w = max(20, bar.winfo_width())
+        h = max(6, bar.winfo_height())
+        bar.delete("all")
+        if percent is not None:
+            fill_w = int(w * max(0.0, min(100.0, percent)) / 100.0)
+            if fill_w > 0:
+                bar.create_rectangle(
+                    0, 0, fill_w, h,
+                    fill=COLORS["red"] if muted else COLORS["cyan"],
+                    outline="",
+                )
+        with self.cfg_lock:
+            thresh = float(self.cfg.get("mute_at_percent", 50.0))
+        tx = int(w * max(0.0, min(100.0, thresh)) / 100.0)
+        bar.create_line(tx, 0, tx, h, fill=COLORS["amber"], width=2)
 
     def _update_status_indicators(self) -> None:
         with self.test_lock:
