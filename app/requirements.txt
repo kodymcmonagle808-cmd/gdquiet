@@ -2,6 +2,7 @@ pycaw
 psutil
 mss
 pillow
+pystray
 winrt-Windows.Media.Ocr
 winrt-Windows.Graphics.Imaging
 winrt-Windows.Storage.Streams

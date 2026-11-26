@@ -230,17 +230,29 @@ def is_geometry_dash_running() -> bool:
 
 
 class AudioMuteController:
-    """Applies per-app mute only to selected processes and restores only what we muted."""
+    """Applies per-app mute or ducking while preserving the previous session state."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._muted_sessions: set[tuple[str, int, str]] = set()
+        self._ducked_sessions: dict[tuple[str, int, str], float] = {}
+        self._active_mode: str | None = None
         self._is_muted = False
 
     @property
     def is_muted(self) -> bool:
         with self._lock:
             return self._is_muted
+
+    @property
+    def is_ducking(self) -> bool:
+        with self._lock:
+            return bool(self._ducked_sessions)
+
+    @property
+    def has_active_effect(self) -> bool:
+        with self._lock:
+            return bool(self._muted_sessions or self._ducked_sessions)
 
     @property
     def muted_session_count(self) -> int:
@@ -256,7 +268,12 @@ class AudioMuteController:
         inst_id = str(getattr(session, "InstanceIdentifier", "") or "")
         return (proc_name, pid, inst_id)
 
-    def apply(self, selected_processes: Iterable[str], mute: bool) -> None:
+    def apply(
+        self,
+        selected_processes: Iterable[str],
+        mute: bool,
+        duck_to: float | None = None,
+    ) -> None:
         selected = {p.lower().strip() for p in selected_processes if p and p.strip()}
         selected -= EXCLUDED_PROCESSES
 
@@ -267,8 +284,13 @@ class AudioMuteController:
                 except Exception:
                     return
 
+                mode = "duck" if duck_to is not None else "mute"
+                target_volume = max(0.0, min(1.0, float(duck_to or 0.0) / 100.0))
+                if mute and self._active_mode not in (None, mode):
+                    self._restore_sessions(sessions)
+                self._active_mode = mode if mute else None
+
                 if mute:
-                    self._is_muted = True
                     for session in sessions:
                         try:
                             if not session.Process:
@@ -279,38 +301,62 @@ class AudioMuteController:
                             vol = session.SimpleAudioVolume
 
                             if proc_name in selected:
-                                current = int(vol.GetMute())
-                                if current == 0:
-                                    vol.SetMute(1, None)
-                                    self._muted_sessions.add(key)
-                            elif key in self._muted_sessions:
-                                # User unchecked an app while already muted: unmute it immediately.
-                                vol.SetMute(0, None)
-                                self._muted_sessions.discard(key)
+                                if mode == "duck":
+                                    if int(vol.GetMute()):
+                                        continue
+                                    original = self._ducked_sessions.get(key)
+                                    current = float(vol.GetMasterVolume())
+                                    if original is None and current > target_volume:
+                                        self._ducked_sessions[key] = current
+                                        vol.SetMasterVolume(target_volume, None)
+                                    elif original is not None:
+                                        vol.SetMasterVolume(min(original, target_volume), None)
+                                else:
+                                    if key in self._ducked_sessions:
+                                        original = self._ducked_sessions[key]
+                                        vol.SetMasterVolume(original, None)
+                                        self._ducked_sessions.pop(key)
+                                    if int(vol.GetMute()) == 0:
+                                        vol.SetMute(1, None)
+                                        self._muted_sessions.add(key)
+                            else:
+                                self._restore_session(key, vol)
                         except Exception:
                             continue
+                    self._is_muted = bool(self._muted_sessions)
                 else:
-                    if self._muted_sessions:
-                        still_muted: set[tuple[str, int, str]] = set()
-                        for session in sessions:
-                            key: tuple[str, int, str] | None = None
-                            try:
-                                if not session.Process:
-                                    continue
-                                key = self._session_key(
-                                    session,
-                                    session.Process.name().lower(),
-                                    int(session.Process.pid),
-                                )
-                                if key in self._muted_sessions:
-                                    session.SimpleAudioVolume.SetMute(0, None)
-                                    still_muted.discard(key)
-                            except Exception:
-                                if key in self._muted_sessions:
-                                    still_muted.add(key)
-                                continue
-                        self._muted_sessions = still_muted
+                    self._restore_sessions(sessions)
                     self._is_muted = bool(self._muted_sessions)
 
-    def restore(self) -> None:
-        self.apply([], False)
+    def _restore_session(self, key: tuple[str, int, str], volume: Any) -> None:
+        if key in self._muted_sessions:
+            volume.SetMute(0, None)
+            self._muted_sessions.discard(key)
+        if key in self._ducked_sessions:
+            volume.SetMasterVolume(self._ducked_sessions[key], None)
+            self._ducked_sessions.pop(key)
+
+    def _restore_sessions(self, sessions: Iterable[Any]) -> None:
+        remaining_muted = set(self._muted_sessions)
+        remaining_ducked = dict(self._ducked_sessions)
+        for session in sessions:
+            key: tuple[str, int, str] | None = None
+            try:
+                if not session.Process:
+                    continue
+                key = self._session_key(
+                    session,
+                    session.Process.name().lower(),
+                    int(session.Process.pid),
+                )
+                self._restore_session(key, session.SimpleAudioVolume)
+                remaining_muted.discard(key)
+                remaining_ducked.pop(key, None)
+            except Exception:
+                if key in self._muted_sessions:
+                    remaining_muted.add(key)
+                if key in self._ducked_sessions:
+                    remaining_ducked[key] = self._ducked_sessions[key]
+        self._muted_sessions = remaining_muted
+        self._ducked_sessions = remaining_ducked
+        self._is_muted = bool(self._muted_sessions)

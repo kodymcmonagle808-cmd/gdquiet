@@ -42,6 +42,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "beta_updates": False,
     "level_detection_beta": False,
     "level_name_corrections": {},
+    "level_profiles": {},
+    "audio_mode": "mute",
+    "ducking_volume": 20.0,
+    "close_to_tray": False,
     "obs_overlay_enabled": False,
     "test_duration_s": 30.0,
 }

@@ -514,6 +514,7 @@ class ScreenReading:
     scan_ms: float = 0.0
     level_name_candidate: str | None = None
     level_detection_error: str | None = None
+    consecutive_missed_reads: int = 0
 
 
 class ScreenTestSession:
@@ -692,6 +693,7 @@ class ScreenPercentWatcher:
                 last_x_frac: float | None = None
                 prefer_luma = False
                 last_target_key: tuple[str, str] | None = None
+                consecutive_missed_reads = 0
 
                 while not self._stop.is_set():
                     cfg = self._get_settings()
@@ -799,6 +801,7 @@ class ScreenPercentWatcher:
                         threshold=threshold,
                         unmute_at_100=unmute_100,
                     )
+                    consecutive_missed_reads = consecutive_missed_reads + 1 if pct is None else 0
 
                     now = time.monotonic()
                     level_name_candidate: str | None = None
@@ -830,10 +833,12 @@ class ScreenPercentWatcher:
                         preview = img.copy()
 
                     if pct is not None:
-                        state = "MUTED" if should_mute else "UNMUTED"
-                        status = f"Watching {source_label} • {pct:.2f}% (mutes at {threshold:.0f}%) • {state}"
+                        active_word = "DUCKED" if cfg.get("audio_mode") == "duck" else "MUTED"
+                        state = active_word if should_mute else "UNMUTED"
+                        status = f"Watching {source_label} • {pct:.2f}% (threshold {threshold:.0f}%) • {state}"
                     elif is_playing:
-                        state = "MUTED" if should_mute else "UNMUTED"
+                        active_word = "DUCKED" if cfg.get("audio_mode") == "duck" else "MUTED"
+                        state = active_word if should_mute else "UNMUTED"
                         status = f"Watching {source_label} • % unreadable, holding {state}"
                     else:
                         status = f"Watching {source_label} • no % visible (in menus or paused) • UNMUTED"
@@ -849,6 +854,7 @@ class ScreenPercentWatcher:
                             scan_ms=scan_ms,
                             level_name_candidate=level_name_candidate,
                             level_detection_error=level_detection_error,
+                            consecutive_missed_reads=consecutive_missed_reads,
                         )
                     )
                     self._stop.wait(play_wait_s if is_playing else idle_wait_s)

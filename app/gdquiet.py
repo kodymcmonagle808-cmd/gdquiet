@@ -18,6 +18,7 @@ from PIL import Image, ImageEnhance, ImageTk
 from config import DEFAULT_CONFIG, app_data_dir, config_path, load_config, save_config
 from discord_hotkey import DiscordDeafenController, GlobalHotkeyWatcher, parse_tk_hotkey, send_hotkey
 from obs_overlay import OverlayServer
+from profiles import apply_level_profile, build_level_profile, profile_key
 from screen_reader import (
     ScreenPercentWatcher,
     ScreenReading,
@@ -201,6 +202,30 @@ def _resource_path(rel_path: str) -> Path:
     return candidates[0]
 
 
+def format_ocr_diagnostics(reading: ScreenReading) -> tuple[str, str]:
+    raw_text = " ".join(reading.raw_text.split())
+    if len(raw_text) > 100:
+        raw_text = raw_text[:97] + "..."
+    if reading.percent is not None:
+        return f"OCR valid • {reading.scan_ms:.0f} ms • raw: {raw_text or '(empty)'}", COLORS["green"]
+    if reading.is_playing or reading.consecutive_missed_reads > 0:
+        text = (
+            f"No valid % in {reading.consecutive_missed_reads} consecutive scans • "
+            f"{reading.scan_ms:.0f} ms • raw: {raw_text or '(empty)'}"
+        )
+        if reading.is_playing and reading.consecutive_missed_reads >= 8:
+            color = COLORS["red"]
+        elif reading.consecutive_missed_reads >= 8:
+            color = COLORS["amber"]
+        else:
+            color = COLORS["amber"] if reading.is_playing else COLORS["subtext"]
+        return text, color
+    return (
+        f"Capture status • {reading.status_text} • raw: {raw_text or '(empty)'}",
+        COLORS["subtext"],
+    )
+
+
 class GDQuietApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -214,6 +239,10 @@ class GDQuietApp:
 
         self.cfg_lock = threading.RLock()
         self.cfg = load_config()
+        self._active_level_name = ""
+        self._active_level_key = ""
+        self._tray_audio_override: bool | None = None
+        self.tray_icon: Any | None = None
 
         self.audio_ctrl = AudioMuteController()
         self.discord_ctrl = DiscordDeafenController(
@@ -272,6 +301,7 @@ class GDQuietApp:
         self.watcher.start()
 
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._start_tray_icon()
         atexit.register(self._cleanup_sync)
         self._test_tick_id: str | None = self.root.after(150, self._test_ui_tick)
         self._startup_update_id: str | None = (
@@ -489,7 +519,10 @@ class GDQuietApp:
 
         self.sidebar_thresh_lbl = tk.Label(
             status_box,
-            text=f"Mutes past {float(self.cfg.get('mute_at_percent', 50.0)):.0f}%",
+            text=(
+                f"{'Ducks at' if self.cfg.get('audio_mode') == 'duck' else 'Mutes past'} "
+                f"{float(self.cfg.get('mute_at_percent', 50.0)):.0f}%"
+            ),
             bg=COLORS["card"],
             fg=COLORS["subtext"],
             font=("Segoe UI", 8),
@@ -511,7 +544,7 @@ class GDQuietApp:
 
         nav_items = [
             ("dashboard", "Overview & 30s Test"),
-            ("apps", "Apps to Mute"),
+            ("apps", f"Apps to {'Duck' if self.cfg.get('audio_mode') == 'duck' else 'Mute'}"),
             ("discord", "Discord Auto-Deafen"),
             ("capture", "Screen Capture"),
             ("settings", "Settings"),
@@ -570,7 +603,7 @@ class GDQuietApp:
 
         self.reset_mute_btn = self._make_button(
             sidebar,
-            "Unmute & Undeafen All",
+            "Restore Audio & Undeafen" if self.cfg.get("audio_mode") == "duck" else "Unmute & Undeafen All",
             self._force_restore_all,
             bg=COLORS["card_alt"],
             pady=6,
@@ -758,7 +791,7 @@ class GDQuietApp:
         )
         tk.Label(
             page,
-            text="Control when apps mute and run a 30-second test to verify screen reading.",
+            text="Control when selected-app audio changes and run a 30-second screen-reading test.",
             bg=COLORS["bg"],
             fg=COLORS["subtext"],
             font=("Segoe UI", 9),
@@ -777,19 +810,42 @@ class GDQuietApp:
         )
         self.level_detection_status_lbl.pack(anchor="w", pady=(0, 8))
 
+        profile_box = tk.Frame(page, bg=COLORS["card"], padx=10, pady=8)
+        profile_box.pack(fill="x", pady=(0, 12))
+        self.active_level_profile_lbl = tk.Label(
+            profile_box,
+            text="No confirmed level profile active",
+            bg=COLORS["card"],
+            fg=COLORS["subtext"],
+            font=("Segoe UI", 9),
+            anchor="w",
+        )
+        self.active_level_profile_lbl.pack(side="left", fill="x", expand=True)
+        self.save_level_profile_btn = self._make_button(
+            profile_box,
+            "Save Current Settings",
+            self._save_active_level_profile,
+            bg=COLORS["card_alt"],
+            padx=10,
+            pady=5,
+            font=("Segoe UI", 8, "bold"),
+        )
+        self.save_level_profile_btn.pack(side="right")
+
         # Card 1: Threshold + quick summary
         trig_card = self._make_card(page)
         trig_card.pack(fill="x", pady=(0, 14))
 
         t_top = tk.Frame(trig_card, bg=COLORS["card"])
         t_top.pack(fill="x")
-        tk.Label(
+        self.trigger_heading_lbl = tk.Label(
             t_top,
-            text="Mute Apps & Discord Past",
+            text="Audio Action at Threshold",
             bg=COLORS["card"],
             fg=COLORS["text"],
             font=("Segoe UI", 11, "bold"),
-        ).pack(side="left")
+        )
+        self.trigger_heading_lbl.pack(side="left")
 
         self.unmute_100_var = tk.BooleanVar(value=bool(self.cfg.get("unmute_at_100", True)))
         tk.Checkbutton(
@@ -968,7 +1024,7 @@ class GDQuietApp:
         ).pack(anchor="w")
         tk.Label(
             tc_title,
-            text="Play any GD level for 30 seconds — we'll show every % detected (nothing will be muted during the test).",
+            text="Play any GD level for 30 seconds — we'll show every % detected (selected-app audio stays unchanged during the test).",
             bg=COLORS["card"],
             fg=COLORS["subtext"],
             font=("Segoe UI", 9),
@@ -1100,16 +1156,22 @@ class GDQuietApp:
 
         hdr = tk.Frame(page, bg=COLORS["bg"])
         hdr.pack(fill="x", pady=(0, 12))
-        tk.Label(hdr, text="Apps to Mute", bg=COLORS["bg"], fg=COLORS["text"], font=("Segoe UI", 17, "bold")).pack(
-            anchor="w"
-        )
-        tk.Label(
+        self.apps_page_heading_lbl = tk.Label(
             hdr,
-            text="Select only the windows/apps you want muted when passing your %. Geometry Dash is never muted.",
+            text="Apps to Mute",
+            bg=COLORS["bg"],
+            fg=COLORS["text"],
+            font=("Segoe UI", 17, "bold"),
+        )
+        self.apps_page_heading_lbl.pack(anchor="w")
+        self.apps_page_desc_lbl = tk.Label(
+            hdr,
+            text="Select only the windows/apps whose audio should change when passing your %. Geometry Dash is never affected.",
             bg=COLORS["bg"],
             fg=COLORS["subtext"],
             font=("Segoe UI", 9),
-        ).pack(anchor="w", pady=(2, 0))
+        )
+        self.apps_page_desc_lbl.pack(anchor="w", pady=(2, 0))
 
         card = self._make_card(page, padx=14, pady=12)
         card.pack(fill="both", expand=True)
@@ -1398,8 +1460,8 @@ class GDQuietApp:
                 "Start your level UNDEAFENED in Discord. GD Quiet only sends the toggle key when crossing your % and sends it again when you die, exit, or reach 100%. Click Test Hotkey once or uncheck Auto-Deafen to resync.",
             ),
             (
-                "Want to mute YouTube, Spotify, or browsers instead?",
-                "Open the 'Apps to Mute' tab and check those windows directly — GD Quiet mutes them silently via Windows audio without needing any keybinds.",
+                "Want to manage YouTube, Spotify, or browser audio instead?",
+                "Open the Apps tab and select those windows — GD Quiet adjusts their audio through Windows without needing any keybinds.",
             ),
         ]
 
@@ -1598,6 +1660,18 @@ class GDQuietApp:
         )
         self.watch_status_label.pack(anchor="w", pady=(2, 0))
 
+        self.ocr_diagnostics_label = tk.Label(
+            prev_box,
+            text="OCR diagnostics: waiting for first scan",
+            bg=COLORS["input"],
+            fg=COLORS["subtext"],
+            font=("Consolas", 8),
+            anchor="w",
+            justify="left",
+            wraplength=680,
+        )
+        self.ocr_diagnostics_label.pack(anchor="w", fill="x", pady=(5, 0))
+
         tk.Label(
             prev_card,
             text="For best accuracy, run Geometry Dash in Borderless or Windowed mode with 'Show Percentage' enabled.",
@@ -1753,17 +1827,55 @@ class GDQuietApp:
         add_number_row(
             c1,
             "mute_at_percent",
-            "Mute Threshold Percent",
+            "Audio Action Threshold Percent",
             "% (0-100)",
             0.0,
             100.0,
             is_int=False,
             on_apply=self._on_settings_percent_applied,
         )
+        mode_row = tk.Frame(c1, bg=COLORS["card"])
+        mode_row.pack(fill="x", pady=4)
+        tk.Label(
+            mode_row,
+            text="Audio Action",
+            bg=COLORS["card"],
+            fg=COLORS["text"],
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side="left")
+        self.audio_mode_var = tk.StringVar(value=str(self.cfg.get("audio_mode", "mute")))
+        audio_mode_combo = ttk.Combobox(
+            mode_row,
+            textvariable=self.audio_mode_var,
+            values=("mute", "duck"),
+            state="readonly",
+            width=10,
+            style="Dark.TCombobox",
+        )
+        audio_mode_combo.pack(side="right")
+        audio_mode_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_audio_mode_changed())
+        tk.Label(
+            c1,
+            text="Duck lowers selected apps; optional Discord auto-deafen remains separate.",
+            bg=COLORS["card"],
+            fg=COLORS["subtext"],
+            font=("Segoe UI", 8),
+            anchor="w",
+        ).pack(anchor="w", padx=(0, 0), pady=(0, 4))
+        add_number_row(
+            c1,
+            "ducking_volume",
+            "Ducked App Volume",
+            "% (0-100)",
+            0.0,
+            100.0,
+            is_int=False,
+            on_apply=self._on_ducking_volume_applied,
+        )
         add_number_row(
             c1,
             "missing_timeout_s",
-            "Unmute Delay After % Disappears (Death / Exit)",
+            "Restore Audio Delay After % Disappears (Death / Exit)",
             "sec",
             0.05,
             5.0,
@@ -1772,7 +1884,7 @@ class GDQuietApp:
         add_number_row(
             c1,
             "remute_interval_s",
-            "Re-Enforce Mute Interval (New Audio Streams)",
+            "Re-Enforce Audio Action Interval (New Audio Streams)",
             "sec",
             0.1,
             5.0,
@@ -1780,23 +1892,23 @@ class GDQuietApp:
         )
         add_toggle(
             c1,
-            "Unmute & Undeafen at 100% (Level Complete)",
-            "Automatically restore audio and Discord when reaching 100%.",
+            "Restore Audio & Undeafen at 100% (Level Complete)",
+            "Automatically restore selected-app audio and Discord when reaching 100%.",
             self.unmute_100_var,
             self._on_toggle_unmute_100,
         )
         add_toggle(
             c1,
             "Show Background Audio Processes",
-            "Include apps without visible windows in the Apps to Mute list.",
+            "Include apps without visible windows in the audio apps list.",
             self.bg_audio_var,
             self._on_toggle_bg_audio,
         )
         self.sound_feedback_var = tk.BooleanVar(value=bool(self.cfg.get("sound_feedback", False)))
         add_toggle(
             c1,
-            "Play Sound Chime on Mute / Unmute",
-            "Plays a subtle Windows notification sound whenever GD Quiet mutes or unmutes.",
+            "Play Sound Chime on Audio Change",
+            "Plays a subtle Windows notification sound whenever GD Quiet changes selected-app audio.",
             self.sound_feedback_var,
             self._on_toggle_sound_feedback,
         )
@@ -1862,7 +1974,7 @@ class GDQuietApp:
         add_toggle(
             c3,
             "Enable Discord Auto-Deafen",
-            "Send your Discord Toggle Deafen keybind when crossing the mute threshold.",
+            "Send your Discord Toggle Deafen keybind when crossing the configured threshold.",
             self.auto_deafen_var,
             self._on_toggle_auto_deafen,
         )
@@ -1898,6 +2010,14 @@ class GDQuietApp:
             "Minimize GD Quiet to the taskbar automatically when launched.",
             self.start_minimized_var,
             self._on_toggle_start_minimized,
+        )
+        self.close_to_tray_var = tk.BooleanVar(value=bool(self.cfg.get("close_to_tray", False)))
+        add_toggle(
+            c4,
+            "Close to System Tray",
+            "Keep GD Quiet running in the tray when the window is closed. Use Exit in the tray menu to quit.",
+            self.close_to_tray_var,
+            self._on_toggle_close_to_tray,
         )
         self.auto_updates_var = tk.BooleanVar(value=bool(self.cfg.get("auto_check_updates", True)))
         add_toggle(
@@ -2306,7 +2426,7 @@ class GDQuietApp:
             watcher = getattr(self, "watcher", None)
             if watcher is not None and hasattr(watcher, "_debouncer"):
                 watcher._debouncer.reset()
-            self._apply_mute_state(False)
+            self._apply_mute_state(self._tray_audio_override is True)
         self._update_status_indicators()
 
     def _apply_window_preferences(self) -> None:
@@ -2319,6 +2439,81 @@ class GDQuietApp:
                 self.root.iconify()
             except Exception:
                 pass
+
+    def _start_tray_icon(self) -> None:
+        try:
+            from pystray import Icon, Menu, MenuItem
+
+            with Image.open(_resource_path("assets/gdquiet.ico")) as icon_image:
+                image = icon_image.convert("RGBA")
+            self.tray_icon = Icon(
+                "GD Quiet",
+                image,
+                "GD Quiet",
+                menu=Menu(
+                    MenuItem("Open GD Quiet", lambda _icon, _item: self._schedule_tray_action(self._show_window)),
+                    MenuItem(
+                        "Pause / Resume Watching",
+                        lambda _icon, _item: self._schedule_tray_action(self._toggle_watching),
+                    ),
+                    MenuItem(
+                        "Toggle Audio Action",
+                        lambda _icon, _item: self._schedule_tray_action(self._toggle_tray_mute),
+                    ),
+                    Menu.SEPARATOR,
+                    MenuItem("Exit", lambda _icon, _item: self._schedule_tray_action(self._exit_from_tray)),
+                ),
+            )
+            self.tray_icon.run_detached()
+        except Exception as exc:
+            self.tray_icon = None
+            self.footer_error.configure(text=f"System tray unavailable: {exc}", fg=COLORS["amber"])
+
+    def _schedule_tray_action(self, action: Callable[[], None]) -> None:
+        if self._closing:
+            return
+        try:
+            self.root.after(0, action)
+        except tk.TclError:
+            return
+
+    def _show_window(self) -> None:
+        if self._closing:
+            return
+        self.root.deiconify()
+        self.root.state("normal")
+        self.root.lift()
+        self.root.focus_force()
+
+    def _exit_from_tray(self) -> None:
+        self._on_close(force_exit=True)
+
+    def _toggle_tray_mute(self) -> None:
+        current = self.current_want_mute or self.audio_ctrl.has_active_effect
+        if self._tray_audio_override is not None:
+            current = self._tray_audio_override
+        self._tray_audio_override = not current
+        self._apply_mute_state(self._tray_audio_override, force_reapply=True)
+        self._update_status_indicators()
+
+    def _on_toggle_close_to_tray(self) -> None:
+        with self.cfg_lock:
+            self.cfg["close_to_tray"] = bool(self.close_to_tray_var.get())
+        self._save_cfg()
+
+    def _on_audio_mode_changed(self) -> None:
+        mode = self.audio_mode_var.get()
+        if mode not in {"mute", "duck"}:
+            mode = "mute"
+            self.audio_mode_var.set(mode)
+        with self.cfg_lock:
+            self.cfg["audio_mode"] = mode
+        self._save_cfg()
+        self._update_sidebar_badges()
+        self._apply_mute_state(self.current_want_mute, force_reapply=True)
+
+    def _on_ducking_volume_applied(self, _volume: float) -> None:
+        self._apply_mute_state(self.current_want_mute, force_reapply=True)
 
     def _on_settings_percent_applied(self, pct: float) -> None:
         self.percent_var.set(pct)
@@ -2381,6 +2576,68 @@ class GDQuietApp:
             self.level_detection_status_lbl.configure(text="Level detection beta is off.", fg=COLORS["subtext"])
             self._dismiss_level_detection_candidate()
 
+    def _activate_level_profile(self, level_name: str, key: str) -> None:
+        if not key:
+            return
+        with self.cfg_lock:
+            profiles = self.cfg.get("level_profiles")
+            profiles = dict(profiles) if isinstance(profiles, dict) else {}
+            existing = profiles.get(key)
+            if isinstance(existing, dict):
+                profile = dict(existing)
+                self.cfg = apply_level_profile(self.cfg, profile)
+                message = f"Loaded saved settings for {level_name}."
+            else:
+                profile = build_level_profile(level_name, self.cfg)
+                profiles[key] = profile
+                self.cfg["level_profiles"] = profiles
+                message = f"Created a profile for {level_name}. Adjust settings, then save them here."
+            self._active_level_name = str(profile.get("name") or level_name)
+            self._active_level_key = key
+            self.cfg["level_profiles"] = profiles
+        self._save_cfg()
+        if hasattr(self, "active_level_profile_lbl"):
+            self.active_level_profile_lbl.configure(
+                text=f"Active level profile: {self._active_level_name} — {message}",
+                fg=COLORS["green"] if isinstance(existing, dict) else COLORS["amber"],
+            )
+        self._sync_level_profile_widgets()
+
+    def _save_active_level_profile(self) -> None:
+        if not self._active_level_key:
+            self.active_level_profile_lbl.configure(
+                text="Confirm a detected level first to create its profile.",
+                fg=COLORS["amber"],
+            )
+            return
+        with self.cfg_lock:
+            profiles = self.cfg.get("level_profiles")
+            profiles = dict(profiles) if isinstance(profiles, dict) else {}
+            profiles[self._active_level_key] = build_level_profile(self._active_level_name, self.cfg)
+            self.cfg["level_profiles"] = profiles
+        self._save_cfg()
+        self.active_level_profile_lbl.configure(
+            text=f"Saved current threshold, app selection, and capture region for {self._active_level_name}.",
+            fg=COLORS["green"],
+        )
+
+    def _sync_level_profile_widgets(self) -> None:
+        threshold = float(self.cfg.get("mute_at_percent", 50.0))
+        if hasattr(self, "percent_var"):
+            self.percent_var.set(threshold)
+            self.percent_entry_var.set(f"{threshold:.0f}")
+        if hasattr(self, "_settings_num_vars") and "mute_at_percent" in self._settings_num_vars:
+            self._settings_num_vars["mute_at_percent"][0].set(f"{threshold:.3f}".rstrip("0").rstrip("."))
+        if hasattr(self, "target_proc_var"):
+            self.target_proc_var.set(str(self.cfg.get("target_process") or "geometrydash.exe"))
+            self.region_mode_label.configure(text=self._describe_region_mode())
+            self._refresh_target_windows()
+        if hasattr(self, "win_list_frame"):
+            self._refresh_windows()
+        self._update_sidebar_badges()
+        if self.current_want_mute:
+            self._apply_mute_state(True, force_reapply=True)
+
     def _show_level_detection_candidate(self, raw_name: str) -> None:
         if self._closing:
             return
@@ -2410,7 +2667,10 @@ class GDQuietApp:
         )
 
     def _confirm_level_detection_candidate(self) -> None:
-        self._save_level_detection_feedback(self._pending_level_display)
+        level_name = self._pending_level_display
+        key = profile_key(self._pending_level_raw)
+        self._save_level_detection_feedback(level_name)
+        self._activate_level_profile(level_name, key)
 
     def _edit_level_detection_candidate(self) -> None:
         self.level_correction_entry.delete(0, "end")
@@ -2421,7 +2681,9 @@ class GDQuietApp:
     def _save_level_detection_correction(self) -> None:
         corrected = self.level_correction_entry.get().strip()
         if corrected:
+            key = profile_key(self._pending_level_raw)
             self._save_level_detection_feedback(corrected)
+            self._activate_level_profile(corrected, key)
         else:
             self.level_detection_prompt_label.configure(text="Enter the correct level name, or choose Later.")
 
@@ -2463,6 +2725,8 @@ class GDQuietApp:
             return
         with self.cfg_lock:
             self.cfg = dict(DEFAULT_CONFIG)
+        self._active_level_name = ""
+        self._active_level_key = ""
         self._save_cfg()
         if self.obs_overlay_server.running:
             self._stop_obs_overlay(persist=False)
@@ -2486,9 +2750,11 @@ class GDQuietApp:
         self.sound_feedback_var.set(bool(self.cfg["sound_feedback"]))
         self.always_on_top_var.set(bool(self.cfg["always_on_top"]))
         self.start_minimized_var.set(bool(self.cfg["start_minimized"]))
+        self.close_to_tray_var.set(bool(self.cfg["close_to_tray"]))
         self.auto_updates_var.set(bool(self.cfg["auto_check_updates"]))
         self.beta_updates_var.set(bool(self.cfg["beta_updates"]))
         self.level_detection_var.set(bool(self.cfg["level_detection_beta"]))
+        self.audio_mode_var.set(str(self.cfg["audio_mode"]))
         for key, (var, _mn, _mx, is_int) in self._settings_num_vars.items():
             val = self.cfg.get(key, DEFAULT_CONFIG[key])
             sval = f"{int(round(float(val)))}" if is_int else f"{float(val):.2f}".rstrip("0").rstrip(".")
@@ -2503,6 +2769,11 @@ class GDQuietApp:
             pass
         self._apply_watch_toggle_hotkey()
         self.level_detection_status_lbl.configure(text="Level detection beta is off.", fg=COLORS["subtext"])
+        self.active_level_profile_lbl.configure(
+            text="No confirmed level profile active",
+            fg=COLORS["subtext"],
+        )
+        self.trigger_heading_lbl.configure(text="Audio Action at Threshold")
         self._dismiss_level_detection_candidate()
         self._force_restore_all()
         self._refresh_windows()
@@ -2670,7 +2941,11 @@ class GDQuietApp:
             watch_enabled = bool(self.cfg.get("watch_enabled", True))
             remute_interval_s = max(0.1, min(5.0, float(self.cfg.get("remute_interval_s", 0.4))))
             sound_feedback = bool(self.cfg.get("sound_feedback", False))
-        effective_mute = False if (testing or not watch_enabled) else reading.should_mute
+        effective_mute = (
+            self._tray_audio_override
+            if self._tray_audio_override is not None
+            else bool(not testing and watch_enabled and reading.should_mute)
+        )
         now_m = time.monotonic()
         if effective_mute != self.current_want_mute:
             self.current_want_mute = effective_mute
@@ -2720,6 +2995,8 @@ class GDQuietApp:
             self.detected_pct_label.configure(text="Detected: --%", fg=COLORS["text"])
 
         self.watch_status_label.configure(text=reading.status_text)
+        diagnostic, diagnostic_color = format_ocr_diagnostics(reading)
+        self.ocr_diagnostics_label.configure(text=diagnostic, fg=diagnostic_color)
 
         if reading.preview_image is not None:
             thumb = reading.preview_image.copy()
@@ -2758,6 +3035,7 @@ class GDQuietApp:
 
         deafened = self.discord_ctrl.deafened_by_us
         apps_muted = self.audio_ctrl.is_muted
+        apps_ducked = self.audio_ctrl.is_ducking
         with self.cfg_lock:
             auto_deaf = bool(self.cfg.get("auto_deafen", False))
             hk = self.cfg.get("deafen_hotkey")
@@ -2768,6 +3046,8 @@ class GDQuietApp:
             color, txt = COLORS["subtext"], "PAUSED"
         elif apps_muted or deafened:
             color, txt = COLORS["red"], "MUTED"
+        elif apps_ducked:
+            color, txt = COLORS["amber"], "DUCKING"
         else:
             color, txt = COLORS["green"], "WATCHING"
 
@@ -2779,9 +3059,12 @@ class GDQuietApp:
             if deafened and apps_muted:
                 deaf_lbl.configure(text="Apps & Discord: Muted", fg=COLORS["red"])
             elif deafened:
-                deaf_lbl.configure(text="Discord: Deafened", fg=COLORS["red"])
+                app_state = " • Apps Ducked" if apps_ducked else ""
+                deaf_lbl.configure(text=f"Discord: Deafened{app_state}", fg=COLORS["red"])
             elif apps_muted:
                 deaf_lbl.configure(text="Apps: Muted", fg=COLORS["red"])
+            elif apps_ducked:
+                deaf_lbl.configure(text="Apps: Ducked", fg=COLORS["amber"])
             else:
                 deaf_lbl.configure(text="Audio & Discord: Clear", fg=COLORS["subtext"])
 
@@ -2803,10 +3086,25 @@ class GDQuietApp:
             hk = self.cfg.get("deafen_hotkey")
             proc = str(self.cfg.get("target_process") or "geometrydash.exe")
             pct = float(self.cfg.get("mute_at_percent", 50.0))
+            audio_mode = str(self.cfg.get("audio_mode", "mute"))
 
-        self.sidebar_thresh_lbl.configure(text=f"Mutes past {pct:.0f}%")
+        action = "Ducks at" if audio_mode == "duck" else "Mutes past"
+        self.sidebar_thresh_lbl.configure(text=f"{action} {pct:.0f}%")
+        self.reset_mute_btn.configure(
+            text="Restore Audio & Undeafen" if audio_mode == "duck" else "Unmute & Undeafen All"
+        )
         if "apps" in self._nav_buttons:
-            self._nav_buttons["apps"][2].configure(text=f"Apps to Mute ({n_apps})")
+            app_action = "Duck" if audio_mode == "duck" else "Mute"
+            self._nav_buttons["apps"][2].configure(text=f"Apps to {app_action} ({n_apps})")
+        app_action = "Duck" if audio_mode == "duck" else "Mute"
+        app_past = "ducked" if audio_mode == "duck" else "muted"
+        self.apps_page_heading_lbl.configure(text=f"Apps to {app_action}")
+        self.apps_page_desc_lbl.configure(
+            text=(
+                f"Select only the windows/apps you want {app_past} when passing your %. "
+                "Geometry Dash is never affected."
+            )
+        )
 
         self.summary_apps_btn.configure(text=f"Apps: {n_apps} selected")
         if auto_deaf and isinstance(hk, dict):
@@ -2849,7 +3147,9 @@ class GDQuietApp:
         self.percent_entry_var.set(f"{pct:.0f}")
         with self.cfg_lock:
             self.cfg["mute_at_percent"] = pct
-        self.sidebar_thresh_lbl.configure(text=f"Mutes past {pct:.0f}%")
+            audio_mode = str(self.cfg.get("audio_mode", "mute"))
+        action = "Ducks at" if audio_mode == "duck" else "Mutes past"
+        self.sidebar_thresh_lbl.configure(text=f"{action} {pct:.0f}%")
 
     def _save_mute_percent(self) -> None:
         try:
@@ -2995,7 +3295,7 @@ class GDQuietApp:
                         not self._apply_stop
                         and self._pending_mute is None
                         and last_applied is False
-                        and self.audio_ctrl.is_muted
+                        and self.audio_ctrl.has_active_effect
                     ):
                         self._pending_mute = False
                         self._force_reapply = True
@@ -3010,7 +3310,13 @@ class GDQuietApp:
                     selected = list(self.cfg.get("selected_apps") or [])
                     hotkey = self.cfg.get("deafen_hotkey")
                     auto_deafen = bool(self.cfg.get("auto_deafen", False))
-                self.audio_ctrl.apply(selected, target_mute)
+                    audio_mode = str(self.cfg.get("audio_mode", "mute"))
+                    ducking_volume = float(self.cfg.get("ducking_volume", 20.0))
+                self.audio_ctrl.apply(
+                    selected,
+                    target_mute,
+                    duck_to=ducking_volume if audio_mode == "duck" else None,
+                )
                 self.discord_ctrl.set_deafened(
                     want_deaf=target_mute,
                     hotkey=hotkey,
@@ -3031,6 +3337,7 @@ class GDQuietApp:
             self._apply_cond.notify_all()
 
     def _force_restore_all(self) -> None:
+        self._tray_audio_override = None
         watcher = getattr(self, "watcher", None)
         if watcher is not None and hasattr(watcher, "_debouncer"):
             watcher._debouncer.reset()
@@ -3447,6 +3754,11 @@ class GDQuietApp:
     def _cleanup_sync(self) -> None:
         if hasattr(self, "obs_overlay_server") and self.obs_overlay_server:
             self.obs_overlay_server.stop()
+        if self.tray_icon is not None:
+            try:
+                self.tray_icon.stop()
+            finally:
+                self.tray_icon = None
         if hasattr(self, "global_hotkey") and self.global_hotkey:
             self.global_hotkey.stop()
         if hasattr(self, "watcher") and self.watcher:
@@ -3469,7 +3781,14 @@ class GDQuietApp:
                 pass
             setattr(self, attr_name, None)
 
-    def _on_close(self) -> None:
+    def _on_close(self, force_exit: bool = False) -> None:
+        if (
+            not force_exit
+            and self.tray_icon is not None
+            and bool(self.cfg.get("close_to_tray", False))
+        ):
+            self.root.withdraw()
+            return
         self._closing = True
         self._cancel_delay_pick()
         for timer_attr in ("_startup_update_id", "_periodic_update_id", "_test_tick_id"):

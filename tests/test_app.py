@@ -14,14 +14,16 @@ sys.path.insert(0, str(APP_DIR))
 
 import config  # noqa: E402
 import discord_hotkey  # noqa: E402
+import profiles  # noqa: E402
 import screen_reader  # noqa: E402
 import updater  # noqa: E402
 import window_audio  # noqa: E402
 
 
 class FakeVolume:
-    def __init__(self, muted: int = 0) -> None:
+    def __init__(self, muted: int = 0, volume: float = 1.0) -> None:
         self.muted = muted
+        self.volume = volume
 
     def GetMute(self) -> int:
         return self.muted
@@ -29,15 +31,35 @@ class FakeVolume:
     def SetMute(self, value: int, _guid) -> None:
         self.muted = int(value)
 
+    def GetMasterVolume(self) -> float:
+        return self.volume
+
+    def SetMasterVolume(self, value: float, _guid) -> None:
+        self.volume = float(value)
+
 
 class FakeSession:
-    def __init__(self, name: str, pid: int, muted: int = 0, instance_id: str = "") -> None:
+    def __init__(
+        self,
+        name: str,
+        pid: int,
+        muted: int = 0,
+        instance_id: str = "",
+        volume: float = 1.0,
+    ) -> None:
         self.Process = SimpleNamespace(name=lambda: name, pid=pid)
-        self.SimpleAudioVolume = FakeVolume(muted)
+        self.SimpleAudioVolume = FakeVolume(muted, volume)
         self.InstanceIdentifier = instance_id
 
 
 class GDQuietTests(unittest.TestCase):
+    def setUp(self) -> None:
+        import gdquiet
+
+        tray_start_patch = patch.object(gdquiet.GDQuietApp, "_start_tray_icon")
+        tray_start_patch.start()
+        self.addCleanup(tray_start_patch.stop)
+
     def test_input_struct_size_matches_win32_abi(self) -> None:
         expected = 40 if ctypes.sizeof(ctypes.c_void_p) == 8 else 28
         self.assertEqual(ctypes.sizeof(discord_hotkey.INPUT), expected)
@@ -87,6 +109,186 @@ class GDQuietTests(unittest.TestCase):
             ctrl.apply(["chrome.exe"], mute=True)
             self.assertEqual(chrome.SimpleAudioVolume.muted, 1)
             self.assertEqual(discord.SimpleAudioVolume.muted, 0)
+
+    def test_audio_ducking_restores_original_volume_and_preserves_manual_mutes(self) -> None:
+        chrome = FakeSession("chrome.exe", 101, volume=0.8)
+        manually_muted = FakeSession("spotify.exe", 202, muted=1, volume=0.6)
+        ctrl = window_audio.AudioMuteController()
+        with patch.object(
+            window_audio.AudioUtilities,
+            "GetAllSessions",
+            return_value=[chrome, manually_muted],
+        ):
+            ctrl.apply(["chrome.exe", "spotify.exe"], mute=True, duck_to=25.0)
+            self.assertEqual(chrome.SimpleAudioVolume.volume, 0.25)
+            self.assertEqual(manually_muted.SimpleAudioVolume.volume, 0.6)
+            self.assertEqual(manually_muted.SimpleAudioVolume.muted, 1)
+            self.assertTrue(ctrl.is_ducking)
+            self.assertFalse(ctrl.is_muted)
+
+            ctrl.apply(["chrome.exe", "spotify.exe"], mute=True, duck_to=40.0)
+            self.assertEqual(chrome.SimpleAudioVolume.volume, 0.4)
+            ctrl.apply(["chrome.exe", "spotify.exe"], mute=True, duck_to=90.0)
+            self.assertEqual(chrome.SimpleAudioVolume.volume, 0.8)
+
+            ctrl.apply([], mute=False)
+            self.assertEqual(chrome.SimpleAudioVolume.volume, 0.8)
+            self.assertEqual(manually_muted.SimpleAudioVolume.muted, 1)
+            self.assertFalse(ctrl.is_ducking)
+
+    def test_audio_mode_switch_restores_volume_before_muting(self) -> None:
+        spotify = FakeSession("spotify.exe", 111, volume=0.7)
+        ctrl = window_audio.AudioMuteController()
+        with patch.object(window_audio.AudioUtilities, "GetAllSessions", return_value=[spotify]):
+            ctrl.apply(["spotify.exe"], mute=True, duck_to=20.0)
+            self.assertEqual(spotify.SimpleAudioVolume.volume, 0.2)
+            ctrl.apply(["spotify.exe"], mute=True)
+            self.assertEqual(spotify.SimpleAudioVolume.volume, 0.7)
+            self.assertEqual(spotify.SimpleAudioVolume.muted, 1)
+            ctrl.restore()
+            self.assertEqual(spotify.SimpleAudioVolume.muted, 0)
+
+    def test_audio_duck_restore_retries_after_volume_api_failure(self) -> None:
+        spotify = FakeSession("spotify.exe", 111, volume=0.7)
+        ctrl = window_audio.AudioMuteController()
+        with patch.object(window_audio.AudioUtilities, "GetAllSessions", return_value=[spotify]):
+            ctrl.apply(["spotify.exe"], mute=True, duck_to=20.0)
+
+        attempts = 0
+
+        def restore_volume(value: float, _guid: object) -> None:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise RuntimeError("WASAPI temporarily unavailable")
+            spotify.SimpleAudioVolume.volume = value
+
+        with (
+            patch.object(window_audio.AudioUtilities, "GetAllSessions", return_value=[spotify]),
+            patch.object(spotify.SimpleAudioVolume, "SetMasterVolume", side_effect=restore_volume),
+        ):
+            ctrl.restore()
+            self.assertEqual(spotify.SimpleAudioVolume.volume, 0.2)
+            self.assertTrue(ctrl.is_ducking)
+            ctrl.restore()
+            self.assertEqual(spotify.SimpleAudioVolume.volume, 0.7)
+            self.assertFalse(ctrl.is_ducking)
+
+    def test_level_profile_round_trip_is_local_and_copies_capture_settings(self) -> None:
+        config_data = {
+            "mute_at_percent": 67.5,
+            "selected_apps": ["Spotify.exe", "chrome.exe"],
+            "watch_mode": "custom_region",
+            "target_process": "geometrydash.exe",
+            "custom_region": {"kind": "screen", "left": 2, "top": 3, "width": 40, "height": 20},
+            "auto_deafen": True,
+        }
+        profile = profiles.build_level_profile("Stereo Madness", config_data)
+        self.assertEqual(profiles.profile_key("stereo madness"), "stereomadness")
+        self.assertEqual(profile["selected_apps"], ["chrome.exe", "spotify.exe"])
+        self.assertEqual(profile["custom_region"], config_data["custom_region"])
+
+        updated = profiles.apply_level_profile({"auto_deafen": False}, profile)
+        self.assertTrue(updated["auto_deafen"] is False)
+        self.assertEqual(updated["mute_at_percent"], 67.5)
+        self.assertEqual(updated["custom_region"], config_data["custom_region"])
+        profile["custom_region"]["left"] = 99
+        self.assertEqual(updated["custom_region"]["left"], 2)
+
+    def test_confirmed_level_profile_saves_and_reapplies_settings(self) -> None:
+        import threading
+        import gdquiet
+
+        class FakeLabel:
+            def __init__(self) -> None:
+                self.options: dict[str, object] = {}
+
+            def configure(self, **kwargs: object) -> None:
+                self.options.update(kwargs)
+
+        app = gdquiet.GDQuietApp.__new__(gdquiet.GDQuietApp)
+        app.cfg_lock = threading.RLock()
+        app.cfg = dict(config.DEFAULT_CONFIG)
+        app.cfg["level_profiles"] = {}
+        app._active_level_name = ""
+        app._active_level_key = ""
+        app.current_want_mute = False
+        app.active_level_profile_lbl = FakeLabel()
+        app._save_cfg = lambda: None
+        app._sync_level_profile_widgets = lambda: None
+
+        app._activate_level_profile("Stereo Madness", "stereomadness")
+        self.assertIn("stereomadness", app.cfg["level_profiles"])
+        app.cfg["mute_at_percent"] = 72.0
+        app._save_active_level_profile()
+        app.cfg["mute_at_percent"] = 40.0
+        app._activate_level_profile("Stereo Madness", "stereomadness")
+        self.assertEqual(app.cfg["mute_at_percent"], 72.0)
+
+    def test_ocr_diagnostics_flag_missed_reads_and_show_raw_text(self) -> None:
+        import gdquiet
+
+        valid = screen_reader.ScreenReading(
+            percent=47.5,
+            raw_text=" 47.5% ",
+            should_mute=False,
+            is_playing=True,
+            status_text="Watching",
+            preview_image=None,
+            scan_ms=12.4,
+        )
+        text, color = gdquiet.format_ocr_diagnostics(valid)
+        self.assertIn("12 ms", text)
+        self.assertIn("47.5%", text)
+        self.assertEqual(color, gdquiet.COLORS["green"])
+
+        missed = screen_reader.ScreenReading(
+            percent=None,
+            raw_text="garbled text",
+            should_mute=False,
+            is_playing=True,
+            status_text="Watching",
+            preview_image=None,
+            scan_ms=8.1,
+            consecutive_missed_reads=9,
+        )
+        text, color = gdquiet.format_ocr_diagnostics(missed)
+        self.assertIn("9 consecutive scans", text)
+        self.assertIn("garbled text", text)
+        self.assertEqual(color, gdquiet.COLORS["red"])
+
+        missed_menu = screen_reader.ScreenReading(
+            percent=None,
+            raw_text="",
+            should_mute=False,
+            is_playing=False,
+            status_text="Watching • no % visible",
+            preview_image=None,
+            consecutive_missed_reads=10,
+        )
+        text, color = gdquiet.format_ocr_diagnostics(missed_menu)
+        self.assertIn("10 consecutive scans", text)
+        self.assertEqual(color, gdquiet.COLORS["amber"])
+
+    def test_tray_action_can_force_unmute_and_then_mute(self) -> None:
+        import threading
+        import gdquiet
+
+        app = gdquiet.GDQuietApp.__new__(gdquiet.GDQuietApp)
+        app.current_want_mute = True
+        app._tray_audio_override = None
+        app.audio_ctrl = SimpleNamespace(has_active_effect=True)
+        app._apply_cond = threading.Condition()
+        app._pending_mute = None
+        app._force_reapply = False
+        app._update_status_indicators = lambda: None
+
+        app._toggle_tray_mute()
+        self.assertFalse(app._tray_audio_override)
+        self.assertFalse(app.current_want_mute)
+        app._toggle_tray_mute()
+        self.assertTrue(app._tray_audio_override)
+        self.assertTrue(app.current_want_mute)
 
     def test_default_config_excludes_supabase_keys(self) -> None:
         self.assertNotIn("supabase_url", config.DEFAULT_CONFIG)
@@ -298,6 +500,17 @@ class GDQuietTests(unittest.TestCase):
             ):
                 app = gdquiet.GDQuietApp(root)
                 mock_watcher.return_value.start.assert_called_once()
+
+                with app.cfg_lock:
+                    app.cfg["audio_mode"] = "duck"
+                app._update_sidebar_badges()
+                self.assertEqual(app.sidebar_thresh_lbl.cget("text"), "Ducks at 50%")
+                self.assertEqual(app._nav_buttons["apps"][2].cget("text"), "Apps to Duck (0)")
+                self.assertEqual(app.apps_page_heading_lbl.cget("text"), "Apps to Duck")
+                self.assertEqual(app.reset_mute_btn.cget("text"), "Restore Audio & Undeafen")
+                with app.cfg_lock:
+                    app.cfg["audio_mode"] = "mute"
+                app._update_sidebar_badges()
 
                 # Start 30s test, simulate readings, then stop early (previously deadlocked!)
                 app._toggle_screen_test()
@@ -931,7 +1144,11 @@ class GDQuietTests(unittest.TestCase):
                 self.attempts = 0
                 self.is_muted = True
 
-            def apply(self, _selected: list[str], mute: bool) -> None:
+            @property
+            def has_active_effect(self) -> bool:
+                return self.is_muted
+
+            def apply(self, _selected: list[str], mute: bool, duck_to: float | None = None) -> None:
                 if not mute:
                     self.attempts += 1
                     if self.attempts >= 2:
