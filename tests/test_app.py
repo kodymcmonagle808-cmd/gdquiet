@@ -552,10 +552,16 @@ class GDQuietTests(unittest.TestCase):
             with patch("subprocess.Popen") as mock_popen:
                 script_path = updater.launch_update_swap_and_restart(staged, target_exe, current_pid=99999)
                 mock_popen.assert_called_once()
+                popen_cmd = mock_popen.call_args.args[0]
+                self.assertEqual(popen_cmd[0], "powershell.exe")
                 self.assertTrue(script_path.is_file())
+                self.assertEqual(script_path.suffix, ".ps1")
                 script_text = script_path.read_text(encoding="utf-8")
-                self.assertIn("copy /y", script_text)
+                self.assertIn("Copy-Item", script_text)
+                self.assertIn("Start-Process", script_text)
                 script_path.unlink(missing_ok=True)
+            updater.cleanup_stale_update_files(target_exe)
+            self.assertFalse(staged.exists())
 
     def test_region_presets_and_capture_coords(self) -> None:
         import tkinter as tk

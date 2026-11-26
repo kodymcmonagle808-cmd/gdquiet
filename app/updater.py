@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-APP_VERSION = "3.0.8"
+APP_VERSION = "3.0.9"
 GITHUB_REPO = "kodymcmonagle808-cmd/gdquiet"
 RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 RELEASES_PAGE_URL = f"https://github.com/{GITHUB_REPO}/releases"
@@ -126,15 +126,25 @@ def check_for_update(
 
 
 def _choose_staging_path(target_exe: Path, version_tag: str) -> Path:
-    candidate = target_exe.with_name(f".{target_exe.name}.update")
+    safe_ver = re.sub(r"[^0-9A-Za-z._-]", "_", version_tag or "latest")
+    candidate = target_exe.with_name(f".{target_exe.name}.{safe_ver}.update")
     try:
         candidate.parent.mkdir(parents=True, exist_ok=True)
         with candidate.open("wb"):
             pass
         return candidate
     except OSError:
-        safe_ver = re.sub(r"[^0-9A-Za-z._-]", "_", version_tag or "latest")
         return Path(tempfile.gettempdir()) / f"gdquiet_update_{safe_ver}.exe"
+
+
+def cleanup_stale_update_files(target_exe: Path) -> None:
+    patterns = [f".{target_exe.name}.update", f".{target_exe.name}.*.update"]
+    for pat in patterns:
+        for stale in target_exe.parent.glob(pat):
+            try:
+                stale.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def download_update(
@@ -193,36 +203,63 @@ def download_update(
 
 
 def write_self_update_script(current_pid: int) -> Path:
-    script_path = Path(tempfile.gettempdir()) / f"gdquiet_self_update_{current_pid}.cmd"
-    content = "\r\n".join(
+    script_path = Path(tempfile.gettempdir()) / f"gdquiet_self_update_{current_pid}.ps1"
+    content = "\n".join(
         [
-            "@echo off",
-            "setlocal",
-            'set "PID=%~1"',
-            'set "SRC=%~2"',
-            'set "DST=%~3"',
-            "for /l %%i in (1,1,40) do (",
-            '  tasklist /nh /fo csv /fi "PID eq %PID%" 2>nul | findstr /c:",\\"%PID%\\"," >nul',
-            "  if errorlevel 1 goto apply",
-            "  ping -n 2 127.0.0.1 >nul",
+            "param(",
+            "    [int]$TargetPid,",
+            "    [int]$ParentPid,",
+            "    [string]$Src,",
+            "    [string]$Dst,",
+            "    [string]$SelfScript",
             ")",
-            ":apply",
-            "for /l %%j in (1,1,15) do (",
-            '  copy /y "%SRC%" "%DST%" >nul 2>&1',
-            "  if not errorlevel 1 (",
-            '    del /f /q "%SRC%" >nul 2>&1',
-            '    start "" "%DST%"',
-            '    del /f /q "%~f0" >nul 2>&1',
-            "    exit /b 0",
-            "  )",
-            "  ping -n 2 127.0.0.1 >nul",
-            ")",
-            "exit /b 1",
+            "for ($i = 0; $i -lt 40; $i++) {",
+            "    $p1 = if ($TargetPid -gt 0) { Get-Process -Id $TargetPid -ErrorAction SilentlyContinue } else { $null }",
+            "    $p2 = if ($ParentPid -gt 0) { Get-Process -Id $ParentPid -ErrorAction SilentlyContinue } else { $null }",
+            "    if (-not $p1 -and -not $p2) { break }",
+            "    Start-Sleep -Milliseconds 250",
+            "}",
+            "$swapped = $false",
+            "for ($j = 0; $j -lt 40; $j++) {",
+            "    try {",
+            "        Copy-Item -LiteralPath $Src -Destination $Dst -Force -ErrorAction Stop",
+            "        $swapped = $true",
+            "        break",
+            "    } catch {",
+            "        Start-Sleep -Milliseconds 250",
+            "    }",
+            "}",
+            "if ($swapped) {",
+            "    Remove-Item -LiteralPath $Src -Force -ErrorAction SilentlyContinue",
+            "    Unblock-File -LiteralPath $Dst -ErrorAction SilentlyContinue",
+            "    $workDir = [System.IO.Path]::GetDirectoryName($Dst)",
+            "    if ($workDir) {",
+            "        Start-Process -FilePath $Dst -WorkingDirectory $workDir",
+            "    } else {",
+            "        Start-Process -FilePath $Dst",
+            "    }",
+            "}",
+            "Remove-Item -LiteralPath $SelfScript -Force -ErrorAction SilentlyContinue",
             "",
         ]
     )
-    script_path.write_text(content, encoding="utf-8")
+    with script_path.open("w", encoding="utf-8", newline="\n") as fh:
+        fh.write(content)
     return script_path
+
+
+def _resolve_bootloader_parent_pid(target_exe: Path) -> int:
+    if not is_packaged_executable():
+        return 0
+    try:
+        import psutil
+
+        ppid = os.getppid()
+        if ppid > 0 and psutil.Process(ppid).name().lower() == target_exe.name.lower():
+            return int(ppid)
+    except Exception:
+        pass
+    return 0
 
 
 def launch_update_swap_and_restart(
@@ -231,9 +268,11 @@ def launch_update_swap_and_restart(
     current_pid: int | None = None,
 ) -> Path:
     pid = os.getpid() if current_pid is None else int(current_pid)
+    parent_pid = _resolve_bootloader_parent_pid(target_exe)
     script_path = write_self_update_script(pid)
+    # Never combine CREATE_NO_WINDOW with DETACHED_PROCESS (causes immediate child exit on Windows).
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
-        subprocess, "DETACHED_PROCESS", 0
+        subprocess, "CREATE_NEW_PROCESS_GROUP", 0
     )
     clean_env = {
         k: v
@@ -242,14 +281,30 @@ def launch_update_swap_and_restart(
     }
     subprocess.Popen(
         [
-            "cmd.exe",
-            "/c",
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
             str(script_path),
+            "-TargetPid",
             str(pid),
+            "-ParentPid",
+            str(parent_pid),
+            "-Src",
             str(staged_exe),
+            "-Dst",
             str(target_exe),
+            "-SelfScript",
+            str(script_path),
         ],
         env=clean_env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         creationflags=creation_flags,
         close_fds=True,
     )

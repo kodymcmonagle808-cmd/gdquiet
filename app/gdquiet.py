@@ -28,6 +28,7 @@ from updater import (
     UpdateError,
     UpdateInfo,
     check_for_update,
+    cleanup_stale_update_files,
     current_executable_path,
     download_update,
     is_packaged_executable,
@@ -246,6 +247,8 @@ class GDQuietApp:
         self._periodic_update_id: str | None = self.root.after(
             300000, self._schedule_periodic_update_check
         )
+        if is_packaged_executable():
+            cleanup_stale_update_files(current_executable_path())
 
     def _snapshot_cfg(self) -> dict[str, Any]:
         with self.cfg_lock:
