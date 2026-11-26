@@ -1940,7 +1940,13 @@ class GDQuietApp:
         # Card 6: OBS Browser Source
         obs_card = self._make_card(self.settings_body, pady=12)
         obs_card.pack(fill="x", pady=(0, 12))
-        self._make_section_heading(obs_card, "OBS Studio Overlay")
+        tk.Label(
+            obs_card,
+            text="OBS Studio Overlay",
+            bg=COLORS["card"],
+            fg=COLORS["cyan"],
+            font=("Segoe UI", 11, "bold"),
+        ).pack(anchor="w", pady=(0, 6))
         tk.Label(
             obs_card,
             text=(
