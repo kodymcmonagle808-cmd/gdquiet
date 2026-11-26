@@ -223,6 +223,7 @@ class DiscordDeafenController:
     def __init__(self, toggle_cooldown_s: float = 0.18) -> None:
         self._lock = threading.Lock()
         self._deafened_by_us = False
+        self._active_hotkey: dict[str, Any] | None = None
         self._toggle_cooldown_s = float(toggle_cooldown_s)
         self._last_toggle_at = 0.0
 
@@ -248,23 +249,31 @@ class DiscordDeafenController:
     def set_deafened(self, want_deaf: bool, hotkey: dict[str, Any] | None, enabled: bool) -> None:
         with self._lock:
             if not enabled or not hotkey:
-                if self._deafened_by_us and hotkey:
-                    self._send_with_cooldown(hotkey)
+                restore_hotkey = self._active_hotkey or hotkey
+                if self._deafened_by_us and restore_hotkey and self._send_with_cooldown(restore_hotkey):
                     self._deafened_by_us = False
+                    self._active_hotkey = None
                 return
 
             if want_deaf and not self._deafened_by_us:
                 if self._send_with_cooldown(hotkey):
                     self._deafened_by_us = True
+                    self._active_hotkey = {
+                        **hotkey,
+                        "modifiers": list(hotkey.get("modifiers", [])),
+                    }
             elif not want_deaf and self._deafened_by_us:
-                if self._send_with_cooldown(hotkey):
+                restore_hotkey = self._active_hotkey or hotkey
+                if self._send_with_cooldown(restore_hotkey):
                     self._deafened_by_us = False
+                    self._active_hotkey = None
 
     def restore(self, hotkey: dict[str, Any] | None) -> None:
         with self._lock:
-            if self._deafened_by_us and hotkey:
-                self._send_with_cooldown(hotkey)
-            self._deafened_by_us = False
+            restore_hotkey = self._active_hotkey or hotkey
+            if self._deafened_by_us and restore_hotkey and self._send_with_cooldown(restore_hotkey):
+                self._deafened_by_us = False
+                self._active_hotkey = None
 
 
 class GlobalHotkeyWatcher:

@@ -285,9 +285,10 @@ class AudioMuteController:
                         except Exception:
                             continue
                 else:
-                    self._is_muted = False
                     if self._muted_sessions:
+                        still_muted: set[tuple[str, int, str]] = set()
                         for session in sessions:
+                            key: tuple[str, int, str] | None = None
                             try:
                                 if not session.Process:
                                     continue
@@ -298,9 +299,13 @@ class AudioMuteController:
                                 )
                                 if key in self._muted_sessions:
                                     session.SimpleAudioVolume.SetMute(0, None)
+                                    still_muted.discard(key)
                             except Exception:
+                                if key in self._muted_sessions:
+                                    still_muted.add(key)
                                 continue
-                        self._muted_sessions.clear()
+                        self._muted_sessions = still_muted
+                    self._is_muted = bool(self._muted_sessions)
 
     def restore(self) -> None:
         self.apply([], False)

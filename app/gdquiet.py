@@ -2552,7 +2552,15 @@ class GDQuietApp:
                     self._pending_mute is None
                     or (self._pending_mute == last_applied and not self._force_reapply)
                 ):
-                    self._apply_cond.wait()
+                    self._apply_cond.wait(timeout=0.5)
+                    if (
+                        not self._apply_stop
+                        and self._pending_mute is None
+                        and last_applied is False
+                        and self.audio_ctrl.is_muted
+                    ):
+                        self._pending_mute = False
+                        self._force_reapply = True
                 if self._apply_stop:
                     return
                 target_mute = bool(self._pending_mute)

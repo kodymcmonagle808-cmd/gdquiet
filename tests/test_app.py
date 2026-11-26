@@ -307,6 +307,30 @@ class GDQuietTests(unittest.TestCase):
         self.assertEqual(len(press_times), 2)
         self.assertGreaterEqual(press_times[1] - press_times[0], 0.04)
 
+    def test_discord_restore_uses_hotkey_that_deafened(self) -> None:
+        original_hotkey = {"modifiers": ["ctrl", "shift"], "vk": ord("D"), "label": "Ctrl + Shift + D"}
+        changed_hotkey = {"modifiers": ["alt"], "vk": ord("F"), "label": "Alt + F"}
+        ctrl = discord_hotkey.DiscordDeafenController(toggle_cooldown_s=0)
+
+        with patch.object(discord_hotkey, "send_hotkey", return_value=True) as mock_send:
+            ctrl.set_deafened(True, original_hotkey, True)
+            ctrl.set_deafened(False, changed_hotkey, True)
+
+        self.assertEqual(mock_send.call_args_list[0].args[0], original_hotkey)
+        self.assertEqual(mock_send.call_args_list[1].args[0], original_hotkey)
+        self.assertFalse(ctrl.deafened_by_us)
+
+    def test_discord_restore_uses_stored_hotkey_when_cleared_or_disabled(self) -> None:
+        original_hotkey = {"modifiers": ["ctrl", "shift"], "vk": ord("D"), "label": "Ctrl + Shift + D"}
+        ctrl = discord_hotkey.DiscordDeafenController(toggle_cooldown_s=0)
+
+        with patch.object(discord_hotkey, "send_hotkey", return_value=True) as mock_send:
+            ctrl.set_deafened(True, original_hotkey, True)
+            ctrl.set_deafened(False, None, False)
+
+        self.assertEqual(mock_send.call_args_list[1].args[0], original_hotkey)
+        self.assertFalse(ctrl.deafened_by_us)
+
     def test_gui_pass_percent_then_death_and_force_restore(self) -> None:
         import time
         import tkinter as tk
@@ -775,6 +799,77 @@ class GDQuietTests(unittest.TestCase):
             ctrl.restore()
             self.assertEqual(fake_session.SimpleAudioVolume.muted, 0)
             self.assertFalse(ctrl.is_muted)
+
+    def test_audio_restore_keeps_tracking_when_session_unmute_fails(self) -> None:
+        fake_session = FakeSession("spotify.exe", 111, muted=0, instance_id="inst1")
+        ctrl = window_audio.AudioMuteController()
+        with patch.object(window_audio.AudioUtilities, "GetAllSessions", return_value=[fake_session]):
+            ctrl.apply(["spotify.exe"], True)
+
+        attempts = 0
+
+        def fail_first_unmute(value: int, _guid: object) -> None:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise RuntimeError("WASAPI temporarily unavailable")
+            fake_session.SimpleAudioVolume.muted = value
+
+        with (
+            patch.object(window_audio.AudioUtilities, "GetAllSessions", return_value=[fake_session]),
+            patch.object(fake_session.SimpleAudioVolume, "SetMute", side_effect=fail_first_unmute),
+        ):
+            ctrl.restore()
+            self.assertEqual(fake_session.SimpleAudioVolume.muted, 1)
+            self.assertTrue(ctrl.is_muted)
+            ctrl.restore()
+            self.assertEqual(fake_session.SimpleAudioVolume.muted, 0)
+            self.assertFalse(ctrl.is_muted)
+
+    def test_apply_worker_retries_failed_audio_restore(self) -> None:
+        import threading
+        import time
+        import gdquiet
+
+        class FakeAudioController:
+            def __init__(self) -> None:
+                self.attempts = 0
+                self.is_muted = True
+
+            def apply(self, _selected: list[str], mute: bool) -> None:
+                if not mute:
+                    self.attempts += 1
+                    if self.attempts >= 2:
+                        self.is_muted = False
+
+        class FakeDiscordController:
+            def set_deafened(self, **_kwargs: object) -> None:
+                pass
+
+        app = gdquiet.GDQuietApp.__new__(gdquiet.GDQuietApp)
+        app._apply_cond = threading.Condition()
+        app._pending_mute = False
+        app._force_reapply = True
+        app._apply_stop = False
+        app.apply_lock = threading.Lock()
+        app.cfg_lock = threading.RLock()
+        app.cfg = {"selected_apps": [], "deafen_hotkey": None, "auto_deafen": False}
+        app.audio_ctrl = FakeAudioController()
+        app.discord_ctrl = FakeDiscordController()
+        app.root = SimpleNamespace(after=lambda *_args: None)
+        worker = threading.Thread(target=app._apply_worker, daemon=True)
+        worker.start()
+        try:
+            deadline = time.monotonic() + 2.0
+            while app.audio_ctrl.is_muted and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertFalse(app.audio_ctrl.is_muted)
+            self.assertEqual(app.audio_ctrl.attempts, 2)
+        finally:
+            with app._apply_cond:
+                app._apply_stop = True
+                app._apply_cond.notify_all()
+            worker.join(timeout=1.0)
 
 
 if __name__ == "__main__":
