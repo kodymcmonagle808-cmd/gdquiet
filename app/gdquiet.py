@@ -2972,7 +2972,7 @@ def main() -> None:
         return
 
     try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("kodymcmonagle.gdquiet.desktop")
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("gdquiet.desktop.app")
     except Exception:
         pass
 

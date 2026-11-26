@@ -10,7 +10,7 @@ to be bound by all terms below.
 1. LICENSE GRANT (MIT LICENSE)
 --------------------------------------------------------------------------------
 GD Quiet is free, open-source software licensed under the MIT License.
-Copyright (c) Kody McMonagle and contributors.
+Copyright (c) GD Quiet contributors.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files, to deal in the Software
@@ -104,8 +104,8 @@ included uninstaller, and optionally removing %APPDATA%\GDQuiet.
 
 9. SOURCE CODE & SUPPORT
 --------------------------------------------------------------------------------
-Official source code, issue tracker, and releases are hosted at:
-  https://github.com/kodymcmonagle808-cmd/gdquiet
+Official source code, issue tracker, and updates are hosted on the project's
+GitHub repository.
 
 By clicking "I accept the agreement" below, you confirm that you accept these
 terms and wish to install GD Quiet.
