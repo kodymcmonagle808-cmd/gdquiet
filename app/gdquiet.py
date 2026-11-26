@@ -1815,6 +1815,14 @@ class GDQuietApp:
             self.auto_updates_var,
             self._on_toggle_auto_updates,
         )
+        self.beta_updates_var = tk.BooleanVar(value=bool(self.cfg.get("beta_updates", False)))
+        add_toggle(
+            c4,
+            "Beta Updates (Opt In)",
+            "Allow prerelease versions to appear in the updater. Disabled by default.",
+            self.beta_updates_var,
+            self._on_toggle_beta_updates,
+        )
 
         # Card 5: Config & Data
         c5 = self._make_card(self.settings_body, pady=12)
@@ -2157,6 +2165,12 @@ class GDQuietApp:
             self.cfg["auto_check_updates"] = bool(self.auto_updates_var.get())
         self._save_cfg()
 
+    def _on_toggle_beta_updates(self) -> None:
+        with self.cfg_lock:
+            self.cfg["beta_updates"] = bool(self.beta_updates_var.get())
+        self._save_cfg()
+        self._check_updates_async(silent=True)
+
     def _open_config_folder(self) -> None:
         try:
             os.startfile(str(app_data_dir()))  # type: ignore[attr-defined]
@@ -2187,6 +2201,7 @@ class GDQuietApp:
         self.always_on_top_var.set(bool(self.cfg["always_on_top"]))
         self.start_minimized_var.set(bool(self.cfg["start_minimized"]))
         self.auto_updates_var.set(bool(self.cfg["auto_check_updates"]))
+        self.beta_updates_var.set(bool(self.cfg["beta_updates"]))
         for key, (var, _mn, _mx, is_int) in self._settings_num_vars.items():
             val = self.cfg.get(key, DEFAULT_CONFIG[key])
             sval = f"{int(round(float(val)))}" if is_int else f"{float(val):.2f}".rstrip("0").rstrip(".")
@@ -2889,7 +2904,12 @@ class GDQuietApp:
 
         def worker() -> None:
             try:
-                info = check_for_update(current_version=APP_VERSION)
+                with self.cfg_lock:
+                    include_prereleases = bool(self.cfg.get("beta_updates", False))
+                info = check_for_update(
+                    current_version=APP_VERSION,
+                    include_prereleases=include_prereleases,
+                )
                 if not self._closing:
                     self.root.after(0, lambda i=info, s=silent: self._on_update_checked(i, s))
             except Exception as exc:

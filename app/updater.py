@@ -10,13 +10,18 @@ import tempfile
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from functools import cmp_to_key
 from pathlib import Path
 from typing import Callable
 
 APP_VERSION = "3.1.5"
 GITHUB_REPO = "kodymcmonagle808-cmd/gdquiet"
 RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+RELEASES_LIST_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
 RELEASES_PAGE_URL = f"https://github.com/{GITHUB_REPO}/releases"
+_VERSION_RE = re.compile(
+    r"^[vV]?(?P<release>\d+(?:\.\d+)*)(?:-(?P<prerelease>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
 
 
 class UpdateError(RuntimeError):
@@ -40,17 +45,53 @@ class UpdateInfo:
 
 def parse_version(version_str: str) -> tuple[int, ...]:
     cleaned = (version_str or "").strip().lstrip("vV")
+    match = _VERSION_RE.fullmatch(cleaned)
+    if match:
+        return tuple(int(part) for part in match.group("release").split("."))
     nums = [int(part) for part in re.findall(r"\d+", cleaned)]
     return tuple(nums) if nums else (0,)
 
 
+def _version_parts(version_str: str) -> tuple[tuple[int, ...], tuple[str, ...] | None]:
+    match = _VERSION_RE.fullmatch((version_str or "").strip())
+    if not match:
+        return parse_version(version_str), None
+    release = tuple(int(part) for part in match.group("release").split("."))
+    prerelease = match.group("prerelease")
+    identifiers = tuple(part.lower() for part in prerelease.split(".")) if prerelease else None
+    return release, identifiers
+
+
+def _compare_versions(left: str, right: str) -> int:
+    left_release, left_pre = _version_parts(left)
+    right_release, right_pre = _version_parts(right)
+    width = max(3, len(left_release), len(right_release))
+    left_release += (0,) * (width - len(left_release))
+    right_release += (0,) * (width - len(right_release))
+    if left_release != right_release:
+        return 1 if left_release > right_release else -1
+    if left_pre is None or right_pre is None:
+        if left_pre is right_pre:
+            return 0
+        return 1 if left_pre is None else -1
+
+    for left_id, right_id in zip(left_pre, right_pre):
+        if left_id == right_id:
+            continue
+        left_numeric = left_id.isdigit()
+        right_numeric = right_id.isdigit()
+        if left_numeric and right_numeric:
+            return 1 if int(left_id) > int(right_id) else -1
+        if left_numeric != right_numeric:
+            return -1 if left_numeric else 1
+        return 1 if left_id > right_id else -1
+    if len(left_pre) == len(right_pre):
+        return 0
+    return 1 if len(left_pre) > len(right_pre) else -1
+
+
 def is_newer_version(latest: str, current: str) -> bool:
-    a = list(parse_version(latest))
-    b = list(parse_version(current))
-    n = max(len(a), len(b))
-    a.extend([0] * (n - len(a)))
-    b.extend([0] * (n - len(b)))
-    return tuple(a) > tuple(b)
+    return _compare_versions(latest, current) > 0
 
 
 def _is_installer_asset_name(name: str) -> bool:
@@ -81,9 +122,11 @@ def _select_exe_asset(assets: list[dict[str, object]]) -> dict[str, object] | No
 def check_for_update(
     current_version: str = APP_VERSION,
     timeout_s: float = 10.0,
+    include_prereleases: bool = False,
 ) -> UpdateInfo:
+    request_url = RELEASES_LIST_API_URL if include_prereleases else RELEASES_API_URL
     req = urllib.request.Request(
-        RELEASES_API_URL,
+        request_url,
         headers={
             "Accept": "application/vnd.github+json",
             "User-Agent": f"GDQuiet/{current_version}",
@@ -96,6 +139,29 @@ def check_for_update(
         raise UpdateError(f"GitHub API HTTP {exc.code}") from exc
     except Exception as exc:
         raise UpdateError(f"Update check failed: {exc}") from exc
+
+    if include_prereleases and isinstance(data, list):
+        releases = [
+            release
+            for release in data
+            if isinstance(release, dict)
+            and not release.get("draft")
+            and _VERSION_RE.fullmatch(str(release.get("tag_name") or "").strip())
+        ]
+        if releases:
+            data = max(
+                releases,
+                key=cmp_to_key(
+                    lambda left, right: _compare_versions(
+                        str(left.get("tag_name") or ""),
+                        str(right.get("tag_name") or ""),
+                    )
+                ),
+            )
+        else:
+            data = {}
+    if not isinstance(data, dict):
+        raise UpdateError("Unexpected response from GitHub Releases.")
 
     tag_name = str(data.get("tag_name") or "").strip()
     latest_version = tag_name.lstrip("vV") or current_version

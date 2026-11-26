@@ -528,6 +528,10 @@ class GDQuietTests(unittest.TestCase):
         self.assertTrue(updater.is_newer_version("v3.0.8", "3.0.7"))
         self.assertFalse(updater.is_newer_version("v3.0.7", "3.0.7"))
         self.assertFalse(updater.is_newer_version("3.0.6", "3.0.7"))
+        self.assertTrue(updater.is_newer_version("v4.0.0-beta.1", "3.1.8"))
+        self.assertTrue(updater.is_newer_version("v4.0.0-beta.2", "v4.0.0-beta.1"))
+        self.assertTrue(updater.is_newer_version("v4.0.0", "v4.0.0-beta.1"))
+        self.assertFalse(updater.is_newer_version("v4.0.0-beta.1", "v4.0.0"))
 
         # Setup Wizard asset should be selected cleanly and marked as an installer
         only_setup = updater._select_exe_asset(
@@ -579,6 +583,27 @@ class GDQuietTests(unittest.TestCase):
         self.assertEqual(info.latest_version, "9.9.9")
         self.assertEqual(info.sha256, sha)
         self.assertTrue(info.is_installer)
+
+        stable_release = {
+            "tag_name": "v3.1.8",
+            "html_url": "https://github.com/kodymcmonagle808-cmd/gdquiet/releases/tag/v3.1.8",
+            "body": "Stable",
+            "assets": [],
+            "draft": False,
+            "prerelease": False,
+        }
+        beta_release = {
+            "tag_name": "v4.0.0-beta.1",
+            "html_url": "https://github.com/kodymcmonagle808-cmd/gdquiet/releases/tag/v4.0.0-beta.1",
+            "body": "Beta",
+            "assets": json.loads(release_json)["assets"],
+            "draft": False,
+            "prerelease": True,
+        }
+        with patch("urllib.request.urlopen", return_value=FakeResp(json.dumps([beta_release, stable_release]).encode())):
+            beta_info = updater.check_for_update(current_version="3.1.8", include_prereleases=True)
+        self.assertEqual(beta_info.latest_version, "4.0.0-beta.1")
+        self.assertTrue(beta_info.update_available)
 
         with tempfile.TemporaryDirectory() as tmp:
             target_exe = Path(tmp) / "GDQuiet.exe"

@@ -39,6 +39,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "always_on_top": False,
     "start_minimized": False,
     "auto_check_updates": True,
+    "beta_updates": False,
     "test_duration_s": 30.0,
 }
 
