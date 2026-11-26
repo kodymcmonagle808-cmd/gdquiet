@@ -392,11 +392,11 @@ class PercentStateDebouncer:
         ts = time.monotonic() if now is None else now
 
         if percent is None:
-            self._high_streak = 0
             self._low_streak = 0
             if self.last_seen_at > 0 and (ts - self.last_seen_at) >= self.missing_timeout_s:
                 self.is_muted = False
                 self.last_percent = None
+                self._high_streak = 0
                 return False, False
             return self.is_muted, (self.last_seen_at > 0 and (ts - self.last_seen_at) < self.missing_timeout_s)
 
@@ -717,9 +717,10 @@ class ScreenPercentWatcher:
                         state = "MUTED" if should_mute else "UNMUTED"
                         status = f"Watching {source_label} • {pct:.2f}% (mutes at {threshold:.0f}%) • {state}"
                     elif is_playing:
-                        status = f"Watching {source_label} • reading..."
+                        state = "MUTED" if should_mute else "UNMUTED"
+                        status = f"Watching {source_label} • % unreadable, holding {state}"
                     else:
-                        status = f"Watching {source_label} • no % visible yet (in menus or paused)"
+                        status = f"Watching {source_label} • no % visible (in menus or paused) • UNMUTED"
 
                     self._on_reading(
                         ScreenReading(

@@ -29,7 +29,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "target_process": "geometrydash.exe",
     "custom_region": None,
     "unmute_at_100": True,
-    "missing_timeout_s": 0.35,
+    "missing_timeout_s": 1.0,
     "remute_interval_s": 0.40,
     "scan_interval_playing_ms": 15,
     "scan_interval_idle_ms": 45,
