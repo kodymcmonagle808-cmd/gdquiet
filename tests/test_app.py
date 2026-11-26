@@ -754,6 +754,11 @@ class GDQuietTests(unittest.TestCase):
             self.assertEqual(fake_session.SimpleAudioVolume.muted, 0)
             self.assertFalse(ctrl.is_muted)
 
+        terms_path = Path(__file__).resolve().parent.parent / "installer" / "TERMS.txt"
+        self.assertTrue(terms_path.is_file())
+        terms_text = terms_path.read_text(encoding="utf-8")
+        self.assertGreater(len(terms_text), 3000)
+
     def test_audio_restore_keeps_tracking_when_session_enumeration_fails(self) -> None:
         fake_session = FakeSession("spotify.exe", 111, muted=0, instance_id="inst1")
         ctrl = window_audio.AudioMuteController()
@@ -770,11 +775,6 @@ class GDQuietTests(unittest.TestCase):
             ctrl.restore()
             self.assertEqual(fake_session.SimpleAudioVolume.muted, 0)
             self.assertFalse(ctrl.is_muted)
-
-        terms_path = Path(__file__).resolve().parent.parent / "installer" / "TERMS.txt"
-        self.assertTrue(terms_path.is_file())
-        terms_text = terms_path.read_text(encoding="utf-8")
-        self.assertGreater(len(terms_text), 3000)
 
 
 if __name__ == "__main__":
