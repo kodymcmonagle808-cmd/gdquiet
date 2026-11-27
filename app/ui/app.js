@@ -21,10 +21,14 @@
     el.style.setProperty("--fill", pct + "%");
   }
 
+  let savedHideTimer = null;
+
   function flashSaved() {
-    document.querySelectorAll(".saved-txt").forEach((el) => {
-      el.textContent = "Settings saved";
-    });
+    document.querySelectorAll(".saved").forEach((el) => el.classList.add("show"));
+    clearTimeout(savedHideTimer);
+    savedHideTimer = setTimeout(() => {
+      document.querySelectorAll(".saved").forEach((el) => el.classList.remove("show"));
+    }, 1800);
   }
 
   function escapeHtml(s) {
@@ -321,9 +325,15 @@
     if (state.pending_update && state.pending_update.latest_version) {
       $("sidebar-update-txt").textContent = `Install v${state.pending_update.latest_version} update`;
       $("sidebar-update-btn").classList.add("has-update");
+      if ($("settings-check-updates-btn")) {
+        $("settings-check-updates-btn").textContent = `Install v${state.pending_update.latest_version} update`;
+      }
     } else {
       $("sidebar-update-txt").textContent = state.update_btn_text || "Check for updates";
       $("sidebar-update-btn").classList.remove("has-update");
+      if ($("settings-check-updates-btn")) {
+        $("settings-check-updates-btn").textContent = state.update_btn_text || "Check for updates now";
+      }
     }
     $("footer-msg").textContent = state.footer_message || "";
 
@@ -890,6 +900,9 @@
     });
     $("obs-preview-btn").addEventListener("click", () => {
       api() && api().preview_obs_overlay();
+    });
+    $("settings-check-updates-btn").addEventListener("click", async () => {
+      await mutate((a) => a.check_or_install_update());
     });
     $("open-config-btn").addEventListener("click", () => {
       api() && api().open_config_folder();

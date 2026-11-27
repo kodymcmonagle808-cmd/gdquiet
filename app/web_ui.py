@@ -535,6 +535,8 @@ class GDQuietWebApp:
                 self._apply_mute_state(False)
         elif key == "always_on_top":
             self._apply_window_preferences()
+        elif key == "beta_updates":
+            threading.Thread(target=lambda: self._check_updates_sync(silent=False), daemon=True).start()
         elif key == "auto_deafen" and not value:
             if self.discord_ctrl.deafened_by_us:
                 with self.cfg_lock:

@@ -10,47 +10,44 @@
 <body>
 <div class="titlebar">
   <div class="tb-drag pywebview-drag-region">
-    <div class="tb-name"><span class="tb-mark"></span><b>GD Quiet</b> <span>Screen Muter</span></div>
+    <div class="tb-name"><img class="tb-icon" src="logo.png" alt="" /><b>GD Quiet</b></div>
   </div>
   <div class="tb-controls">
-    <button id="win-min" title="Minimize" aria-label="Minimize">&#8212;</button>
-    <button id="win-max" title="Maximize" aria-label="Maximize">&#9633;</button>
-    <button id="win-close" class="close" title="Close" aria-label="Close">&#10005;</button>
+    <button type="button" id="win-min" title="Minimize" aria-label="Minimize">&#8212;</button>
+    <button type="button" id="win-max" title="Maximize" aria-label="Maximize">&#9633;</button>
+    <button type="button" id="win-close" class="close" title="Close" aria-label="Close">&#10005;</button>
   </div>
 </div>
 
 <div class="app">
   <aside class="sidebar">
     <div class="brand">
-      <span class="logo">
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3.2L12 18.5v-13L7.2 9.5H4z"/><path d="M16.5 9l4 6M20.5 9l-4 6"/></svg>
-      </span>
-      <span>
-        <span class="name">GD Quiet</span><br />
-        <span class="sub">SCREEN MUTER</span>
-      </span>
+      <div class="logo"><img src="logo.png" alt="GD Quiet" /></div>
+      <div>
+        <div class="name">GD Quiet</div>
+        <div class="sub">Audio &amp; Deafen Tool</div>
+      </div>
     </div>
 
-    <div class="navlabel">WORKSPACE</div>
     <nav>
-      <button class="on" data-page="overview">
+      <button type="button" class="on" data-page="overview">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg>
         <span>Overview</span>
       </button>
-      <button data-page="apps">
+      <button type="button" data-page="apps">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3.2L12 18.5v-13L7.2 9.5H4z"/><path d="M16.5 9l4 6M20.5 9l-4 6"/></svg>
         <span id="nav-apps-label">Apps to mute</span>
         <span class="badge" id="nav-apps-badge">0</span>
       </button>
-      <button data-page="deafen">
+      <button type="button" data-page="deafen">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 14.5v-2.5a8 8 0 0 1 16 0v2.5"/><rect x="2.4" y="13.6" width="4" height="6.2" rx="2"/><rect x="17.6" y="13.6" width="4" height="6.2" rx="2"/></svg>
         <span>Discord auto-deafen</span>
       </button>
-      <button data-page="capture">
+      <button type="button" data-page="capture">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="2.6" y="4" width="18.8" height="12.6" rx="2"/><path d="M9 20.6h6M12 16.6v4"/></svg>
         <span>Screen capture</span>
       </button>
-      <button data-page="settings">
+      <button type="button" data-page="settings">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.6v3M12 18.4v3M2.6 12h3M18.4 12h3M5.4 5.4l2.1 2.1M16.5 16.5l2.1 2.1M18.6 5.4l-2.1 2.1M7.5 16.5l-2.1 2.1"/></svg>
         <span>Settings</span>
       </button>
@@ -60,21 +57,20 @@
       <div class="watcher-head" id="watcher-head"><span class="dot"></span><span id="watcher-state-txt">WATCHING</span></div>
       <div class="watcher-pct" id="watcher-pct">-- %</div>
       <div class="watcher-sub" id="watcher-sub">Audio &amp; Discord: Clear</div>
-      <input type="range" id="sidebar-threshold" min="0" max="100" value="50" style="--fill:50%;margin-top:10px" aria-label="Mute threshold" />
+      <input type="range" id="sidebar-threshold" min="0" max="100" value="50" style="--fill:50%;margin-top:8px" aria-label="Mute threshold" />
       <div class="watcher-thresh" id="watcher-thresh">Mutes past 50%</div>
     </div>
 
     <div class="sidebar-foot">
-      <button class="btn primary block" id="sidebar-watch-btn">
+      <button type="button" class="btn primary block" id="sidebar-watch-btn">
         <span id="sidebar-watch-txt">Pause watching</span>
         <kbd id="sidebar-hk-kbd" style="display:none"></kbd>
       </button>
-      <button class="link" id="sidebar-restore-btn">Unmute &amp; undeafen all</button>
+      <button type="button" class="link" id="sidebar-restore-btn">Unmute &amp; undeafen all</button>
       <div class="ver">
         <span id="app-version">v</span>
-        <button id="sidebar-update-btn">
+        <button type="button" id="sidebar-update-btn">
           <span id="sidebar-update-txt">Check for updates</span>
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M7 17 17 7M9 7h8v8"/></svg>
         </button>
       </div>
       <div class="foot-msg" id="footer-msg"></div>
@@ -86,21 +82,21 @@
       <div class="banner update" id="update-banner">
         <span id="update-banner-txt"></span>
         <div class="banner-actions">
-          <button class="btn primary sm" id="update-banner-install">Update now</button>
-          <button class="btn ghost sm" id="update-banner-later">Later</button>
+          <button type="button" class="btn primary sm" id="update-banner-install">Update now</button>
+          <button type="button" class="btn ghost sm" id="update-banner-later">Later</button>
         </div>
       </div>
 
       <div class="banner level" id="level-banner">
         <span id="level-banner-txt"></span>
         <div class="banner-actions">
-          <button class="btn primary sm" id="level-yes">Yes</button>
-          <button class="btn ghost sm" id="level-correct">Correct</button>
-          <button class="btn ghost sm" id="level-later">Later</button>
+          <button type="button" class="btn primary sm" id="level-yes">Yes</button>
+          <button type="button" class="btn ghost sm" id="level-correct">Correct</button>
+          <button type="button" class="btn ghost sm" id="level-later">Later</button>
         </div>
         <div class="level-corr" id="level-corr-row">
           <input id="level-corr-input" type="text" placeholder="Enter exact level name" />
-          <button class="btn primary sm" id="level-corr-save">Save correction</button>
+          <button type="button" class="btn primary sm" id="level-corr-save">Save correction</button>
         </div>
       </div>
 
@@ -108,16 +104,14 @@
       <section class="view on" id="view-overview">
         <div class="topbar">
           <div>
-            <div class="crumb">GD QUIET / OVERVIEW</div>
             <h1>Overview</h1>
             <p class="lead">Set your mute threshold and test percentage detection.</p>
           </div>
-          <span class="saved"><span class="dot"></span><span class="saved-txt">Settings saved</span></span>
+          <span class="saved"><span class="saved-txt">Saved</span></span>
         </div>
 
         <div class="cols">
           <section class="card">
-            <div class="eyebrow">MUTE THRESHOLD</div>
             <h2 id="ov-threshold-title">Mute threshold</h2>
             <p class="muted" id="ov-threshold-desc">Mute selected apps when your progress passes the threshold.</p>
 
@@ -127,7 +121,7 @@
             </div>
             <input type="range" id="ov-threshold" min="0" max="100" value="50" style="--fill:50%" aria-label="Mute threshold" />
             <div class="scale"><span>0%</span><span>100%</span></div>
-            <button class="btn primary" id="ov-apply-btn">Apply threshold</button>
+            <button type="button" class="btn primary" id="ov-apply-btn">Apply threshold</button>
 
             <div class="divider"></div>
 
@@ -136,50 +130,49 @@
                 <div class="row-t">Restore audio at 100%</div>
                 <div class="row-s">Bring everything back when a level is completed</div>
               </div>
-              <button class="toggle" id="ov-unmute100-tog" aria-label="Restore audio at 100%"></button>
+              <button type="button" class="toggle" id="ov-unmute100-tog" aria-label="Restore audio at 100%"></button>
             </div>
 
             <div class="hotkey-box">
               <div class="hk-head">
-                <span>Toggle checks</span>
+                <span>Toggle checks hotkey</span>
                 <span class="hk-meta">
                   <span class="hk-status" id="ov-hk-status">Inactive</span>
                   <kbd id="ov-hk-kbd">Not set</kbd>
                 </span>
               </div>
               <div class="hk-actions">
-                <button class="btn primary" id="ov-record-hk">Record hotkey</button>
-                <button class="btn ghost" id="ov-clear-hk">Clear</button>
+                <button type="button" class="btn primary sm" id="ov-record-hk">Record hotkey</button>
+                <button type="button" class="btn ghost sm" id="ov-clear-hk">Clear</button>
               </div>
             </div>
           </section>
 
           <aside class="card">
-            <div class="eyebrow">CURRENT SETUP</div>
             <h2>Current setup</h2>
-            <div style="margin-top:8px">
-              <button class="kv" data-nav="apps"><span>Apps to mute</span><b id="ov-setup-apps">0 selected</b></button>
-              <button class="kv" data-nav="deafen"><span>Discord deafen</span><b id="ov-setup-deafen">Off</b></button>
-              <button class="kv" data-nav="capture"><span>Capture source</span><b id="ov-setup-capture">Auto · geometrydash.exe</b></button>
+            <div style="margin-top:6px">
+              <button type="button" class="kv" data-nav="apps"><span>Apps to mute</span><b id="ov-setup-apps">0 selected</b></button>
+              <button type="button" class="kv" data-nav="deafen"><span>Discord deafen</span><b id="ov-setup-deafen">Off</b></button>
+              <button type="button" class="kv" data-nav="capture"><span>Capture source</span><b id="ov-setup-capture">Auto · geometrydash.exe</b></button>
             </div>
             <div class="mini">
               <div id="ov-level-profile">No confirmed level profile</div>
               <span id="ov-level-status">Level detection beta is off</span>
             </div>
             <div class="setup-btns">
-              <button class="btn ghost block" id="ov-save-setup">Save setup</button>
-              <button class="btn ghost" id="ov-pick-spot">Pick % spot</button>
+              <button type="button" class="btn ghost block" id="ov-save-setup">Save setup</button>
+              <button type="button" class="btn ghost" id="ov-pick-spot">Pick % spot</button>
             </div>
           </aside>
         </div>
 
-        <section class="card" style="margin-top:16px">
-          <div class="topbar">
+        <section class="card" style="margin-top:14px">
+          <div class="test-hdr">
             <div>
-              <h2 style="margin-top:0">30-second screen test</h2>
-              <p class="muted" style="max-width:520px">Check percentage detection before your next run. Audio stays unchanged during the test.</p>
+              <h2>30-second screen test</h2>
+              <p class="muted">Check percentage detection before your next run. Audio stays unchanged during the test.</p>
             </div>
-            <button class="btn primary" id="test-toggle-btn">Start 30s test</button>
+            <button type="button" class="btn primary" id="test-toggle-btn">Start 30s test</button>
           </div>
 
           <div class="test-progress-track">
@@ -196,7 +189,7 @@
 
           <div class="test">
             <div>
-              <div class="chart-label">PROGRESS (%)</div>
+              <div class="chart-label">Progress (%)</div>
               <div class="chart">
                 <div class="yaxis"><span>100</span><span>50</span><span>0</span></div>
                 <div class="plot" id="test-plot">
@@ -208,7 +201,7 @@
             </div>
 
             <div class="seen">
-              <h3>PERCENTAGES SEEN</h3>
+              <h3>Percentages seen</h3>
               <p id="test-seen-empty">No readings yet. Detected values will appear here during the test.</p>
               <ul class="seen-list" id="test-seen-list"></ul>
             </div>
@@ -225,11 +218,10 @@
       <section class="view" id="view-apps">
         <div class="topbar">
           <div>
-            <div class="crumb">GD QUIET / APPS TO MUTE</div>
             <h1 id="apps-heading">Apps to mute</h1>
             <p class="lead" id="apps-lead">Select the apps to mute during a run.</p>
           </div>
-          <span class="saved"><span class="dot"></span><span class="saved-txt">Settings saved</span></span>
+          <span class="saved"><span class="saved-txt">Saved</span></span>
         </div>
 
         <div class="card summary">
@@ -249,15 +241,15 @@
             <input type="search" id="apps-search" placeholder="Search apps or windows" aria-label="Search apps or windows" />
           </div>
           <label class="check"><input type="checkbox" id="apps-bg-check" />Show background audio</label>
-          <button class="btn ghost" id="apps-refresh-btn">Refresh windows</button>
-          <button class="btn ghost" id="apps-clear-btn">Clear all</button>
+          <button type="button" class="btn ghost" id="apps-refresh-btn">Refresh windows</button>
+          <button type="button" class="btn ghost" id="apps-clear-btn">Clear all</button>
         </div>
 
         <div class="list">
           <div class="thead">
-            <span>APPLICATION</span>
-            <span>AUDIO STATUS</span>
-            <span>ACTION</span>
+            <span>Application</span>
+            <span>Audio status</span>
+            <span>Action</span>
           </div>
           <div id="apps-list-body"></div>
         </div>
@@ -268,11 +260,8 @@
         </div>
 
         <div class="never">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 2.8 4 6v6c0 4.6 3.3 8.2 8 9.2 4.7-1 8-4.6 8-9.2V6z"/><path d="M8.6 12.2l2.4 2.4 4.4-4.6"/></svg>
-          <div>
-            <b>Geometry Dash is never muted</b>
-            <p>GD Quiet only changes audio for your selected apps. Geometry Dash is never muted or controlled.</p>
-          </div>
+          <b>Geometry Dash is never muted</b>
+          <p>GD Quiet only changes audio for your selected apps. Geometry Dash is never muted or controlled.</p>
         </div>
       </section>
 
@@ -280,11 +269,10 @@
       <section class="view" id="view-deafen">
         <div class="topbar">
           <div>
-            <div class="crumb">GD QUIET / DISCORD AUTO-DEAFEN</div>
             <h1>Discord auto-deafen</h1>
             <p class="lead">Set up automatic Discord deafen for your runs.</p>
           </div>
-          <span class="saved"><span class="dot"></span><span class="saved-txt">Settings saved</span></span>
+          <span class="saved"><span class="saved-txt">Saved</span></span>
         </div>
 
         <div class="cols-deafen">
@@ -292,21 +280,20 @@
             <section class="card">
               <div class="head-row">
                 <div>
-                  <div class="eyebrow">AUTO-DEAFEN</div>
                   <h2>Auto-deafen settings</h2>
                   <p class="muted" id="deafen-desc" style="max-width:460px">Automatically toggle Discord deafen past 50%, then undeafen on death, 100%, or exit.</p>
                 </div>
-                <button class="toggle" id="deafen-toggle" aria-label="Enable auto-deafen"></button>
+                <button type="button" class="toggle" id="deafen-toggle" aria-label="Enable auto-deafen"></button>
               </div>
 
               <div class="hotkey">
                 <div>
-                  <label for="deafen-hk-input">TOGGLE DEAFEN HOTKEY</label>
+                  <label for="deafen-hk-input">Toggle Deafen hotkey</label>
                   <input class="hk-input" id="deafen-hk-input" value="Not set" readonly aria-label="Toggle deafen hotkey" />
                 </div>
-                <button class="btn primary" id="deafen-record-btn">Record hotkey</button>
-                <button class="btn ghost" id="deafen-test-btn">Test hotkey</button>
-                <button class="btn ghost" id="deafen-clear-btn">Clear</button>
+                <button type="button" class="btn primary" id="deafen-record-btn">Record hotkey</button>
+                <button type="button" class="btn ghost" id="deafen-test-btn">Test hotkey</button>
+                <button type="button" class="btn ghost" id="deafen-clear-btn">Clear</button>
               </div>
 
               <div class="divider"></div>
@@ -315,10 +302,10 @@
 
             <section class="card">
               <div class="head-row">
-                <h2 style="margin-top:0">How to set it up</h2>
+                <h2>How to set it up</h2>
                 <div class="tab-bar">
-                  <button class="on" id="guide-tab-steps">Step-by-step guide</button>
-                  <button id="guide-tab-fixes">Troubleshooting</button>
+                  <button type="button" class="on" id="guide-tab-steps">Step-by-step guide</button>
+                  <button type="button" id="guide-tab-fixes">Troubleshooting</button>
                 </div>
               </div>
 
@@ -374,7 +361,7 @@
           </div>
 
           <section class="card">
-            <h2 style="margin-top:0">When Discord undeafens</h2>
+            <h2>When Discord undeafens</h2>
             <p class="muted">Discord undeafens when you:</p>
             <ul class="checks">
               <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12.5 9 17l10.5-10.5"/></svg>Die or leave the level</li>
@@ -383,14 +370,11 @@
             </ul>
 
             <div class="before">
-              <b>BEFORE EVERY RUN</b>
+              <b>Before every run</b>
               <p>Start undeafened so GD Quiet can restore your audio correctly at the end of the attempt.</p>
             </div>
 
-            <button class="btn ghost block" id="deafen-trouble-btn" style="margin-top:12px">
-              Troubleshooting
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M7 17 17 7M9 7h8v8"/></svg>
-            </button>
+            <button type="button" class="btn ghost block" id="deafen-trouble-btn" style="margin-top:12px">Troubleshooting</button>
 
             <p class="tiny">Avoid Space, Up, W, or Esc as hotkeys.</p>
           </section>
@@ -401,11 +385,10 @@
       <section class="view" id="view-capture">
         <div class="topbar">
           <div>
-            <div class="crumb">GD QUIET / SCREEN CAPTURE</div>
             <h1>Screen capture</h1>
             <p class="lead">Choose a game window and the area to read.</p>
           </div>
-          <span class="saved"><span class="dot"></span><span class="saved-txt">Settings saved</span></span>
+          <span class="saved"><span class="saved-txt">Saved</span></span>
         </div>
 
         <div class="cols-cap">
@@ -418,7 +401,7 @@
                   <select id="cap-target-select" aria-label="Target window"></select>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
                 </div>
-                <button class="btn ghost" id="cap-refresh-btn">Refresh windows</button>
+                <button type="button" class="btn ghost" id="cap-refresh-btn">Refresh windows</button>
               </div>
               <div class="paused" id="cap-watch-banner"><span class="dot"></span><span id="cap-watch-banner-txt">Waiting for Geometry Dash...</span></div>
             </section>
@@ -431,9 +414,6 @@
                 <div class="region" id="cap-region-box"><span id="cap-region-box-lbl">AUTO · TOP 10%</span></div>
                 <img id="cap-preview-img" alt="Capture preview" />
                 <div class="pause" id="cap-preview-placeholder">
-                  <div class="glyph">
-                    <svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="5.5" width="3.6" height="13" rx="1.2"/><rect x="13.4" y="5.5" width="3.6" height="13" rx="1.2"/></svg>
-                  </div>
                   <b id="cap-ph-title">Waiting for capture</b>
                   <p id="cap-ph-sub">Start Geometry Dash or resume watching to see live screen data.</p>
                 </div>
@@ -456,29 +436,28 @@
             <p class="muted">Choose where the percentage appears.</p>
 
             <div class="opts" id="cap-opts">
-              <button class="opt" data-preset="auto">Auto top 10%</button>
-              <button class="opt" data-preset="Top Center">Top center</button>
-              <button class="opt" data-preset="Top Left">Top left</button>
-              <button class="opt" data-preset="Top Right">Top right</button>
-              <button class="opt" data-preset="Bottom Center" style="grid-column:1 / -1">Bottom center</button>
+              <button type="button" class="opt" data-preset="auto">Auto top 10%</button>
+              <button type="button" class="opt" data-preset="Top Center">Top center</button>
+              <button type="button" class="opt" data-preset="Top Left">Top left</button>
+              <button type="button" class="opt" data-preset="Top Right">Top right</button>
+              <button type="button" class="opt" data-preset="Bottom Center" style="grid-column:1 / -1">Bottom center</button>
             </div>
 
-            <div class="subhead">CUSTOM REGION</div>
+            <div class="subhead">Custom region</div>
             <div class="custom">
-              <button class="btn primary" id="cap-drag-btn">Drag box on screen</button>
-              <button class="btn ghost" id="cap-delay-btn">Pick with 3s delay</button>
+              <button type="button" class="btn primary" id="cap-drag-btn">Drag box on screen</button>
+              <button type="button" class="btn ghost" id="cap-delay-btn">Pick with 3s delay</button>
             </div>
 
             <div class="current">
-              <b>CURRENT REGION</b>
+              <b>Current region</b>
               <strong id="cap-region-desc">Auto top 10%</strong> — adjust the box if readings are inconsistent.
             </div>
           </section>
         </div>
 
         <div class="tip">
-          <b>Tips for accurate detection</b>
-          Run Geometry Dash in Borderless or Windowed mode with &ldquo;Show Percentage&rdquo; enabled for the best accuracy.
+          <b>Tip:</b>Run Geometry Dash in Borderless or Windowed mode with &ldquo;Show Percentage&rdquo; enabled for the best accuracy.
         </div>
       </section>
 
@@ -486,11 +465,10 @@
       <section class="view" id="view-settings">
         <div class="topbar">
           <div>
-            <div class="crumb">GD QUIET / SETTINGS</div>
             <h1>Settings</h1>
-            <p class="lead">Adjust audio, capture, hotkeys, and window settings.</p>
+            <p class="lead">Adjust audio, capture, hotkeys, updates, and window settings.</p>
           </div>
-          <span class="saved"><span class="dot"></span><span class="saved-txt">Settings saved</span></span>
+          <span class="saved"><span class="saved-txt">Saved</span></span>
         </div>
 
         <div class="grid">
@@ -498,65 +476,56 @@
             <h2>Trigger &amp; muting</h2>
             <p class="cap">When and how selected apps are muted.</p>
 
-            <div class="setrow"><span class="l">Audio action threshold</span><div class="val"><input class="inp" data-num-key="mute_at_percent" /><span class="unit">%</span></div><button class="apply" data-apply-key="mute_at_percent">Apply</button></div>
-            <div class="setrow"><span class="l">Audio action</span><div class="val"><select class="inp" id="set-audio-mode"><option value="mute">Mute</option><option value="duck">Duck</option></select></div><button class="apply" id="set-apply-audio-mode">Apply</button></div>
-            <div class="setrow"><span class="l">Fade before threshold</span><div class="val"><select class="inp" id="set-fade-mode"><option value="off">Off</option><option value="slow">Slow (15%)</option><option value="fast">Fast (5%)</option></select></div><button class="apply" id="set-apply-fade-mode">Apply</button></div>
-            <div class="setrow"><span class="l">Ducked app volume</span><div class="val"><input class="inp" data-num-key="ducking_volume" /><span class="unit">%</span></div><button class="apply" data-apply-key="ducking_volume">Apply</button></div>
-            <div class="setrow"><span class="l">Restore delay after death / exit</span><div class="val"><input class="inp" data-num-key="missing_timeout_s" /><span class="unit">sec</span></div><button class="apply" data-apply-key="missing_timeout_s">Apply</button></div>
-            <div class="setrow"><span class="l">Re-enforce interval &ndash; new streams</span><div class="val"><input class="inp" data-num-key="remute_interval_s" /><span class="unit">sec</span></div><button class="apply" data-apply-key="remute_interval_s">Apply</button></div>
+            <div class="setrow"><span class="l">Audio action threshold</span><div class="val"><input class="inp" data-num-key="mute_at_percent" /><span class="unit">%</span></div><button type="button" class="apply" data-apply-key="mute_at_percent">Apply</button></div>
+            <div class="setrow"><span class="l">Audio action</span><div class="val"><select class="inp" id="set-audio-mode"><option value="mute">Mute</option><option value="duck">Duck</option></select></div><button type="button" class="apply" id="set-apply-audio-mode">Apply</button></div>
+            <div class="setrow"><span class="l">Fade before threshold</span><div class="val"><select class="inp" id="set-fade-mode"><option value="off">Off</option><option value="slow">Slow (15%)</option><option value="fast">Fast (5%)</option></select></div><button type="button" class="apply" id="set-apply-fade-mode">Apply</button></div>
+            <div class="setrow"><span class="l">Ducked app volume</span><div class="val"><input class="inp" data-num-key="ducking_volume" /><span class="unit">%</span></div><button type="button" class="apply" data-apply-key="ducking_volume">Apply</button></div>
+            <div class="setrow"><span class="l">Restore delay after death / exit</span><div class="val"><input class="inp" data-num-key="missing_timeout_s" /><span class="unit">sec</span></div><button type="button" class="apply" data-apply-key="missing_timeout_s">Apply</button></div>
+            <div class="setrow"><span class="l">Re-enforce interval (new streams)</span><div class="val"><input class="inp" data-num-key="remute_interval_s" /><span class="unit">sec</span></div><button type="button" class="apply" data-apply-key="remute_interval_s">Apply</button></div>
 
-            <div class="togrow" style="margin-top:6px"><span>Restore audio &amp; undeafen at 100%</span><button class="toggle" data-bool-key="unmute_at_100" aria-label="Restore audio and undeafen at 100%"></button></div>
-            <div class="togrow"><span>Show background audio processes</span><button class="toggle" data-bool-key="show_background_audio" aria-label="Show background audio processes"></button></div>
-            <div class="togrow"><span>Play sound chime on audio change</span><button class="toggle" data-bool-key="sound_feedback" aria-label="Play sound chime on audio change"></button></div>
+            <div class="togrow" style="margin-top:6px"><span>Restore audio &amp; undeafen at 100%</span><button type="button" class="toggle" data-bool-key="unmute_at_100" aria-label="Restore audio and undeafen at 100%"></button></div>
+            <div class="togrow"><span>Show background audio processes</span><button type="button" class="toggle" data-bool-key="show_background_audio" aria-label="Show background audio processes"></button></div>
+            <div class="togrow"><span>Play sound chime on audio change</span><button type="button" class="toggle" data-bool-key="sound_feedback" aria-label="Play sound chime on audio change"></button></div>
           </section>
 
           <section class="card">
             <h2>OCR &amp; screen capture</h2>
             <p class="cap">How often the percentage is read from the game.</p>
 
-            <div class="togrow"><span>Enable screen percentage watching</span><button class="toggle" data-bool-key="watch_enabled" aria-label="Enable screen percentage watching"></button></div>
-            <div class="setrow"><span class="l">Scan interval while playing</span><div class="val"><input class="inp" data-num-key="scan_interval_playing_ms" /><span class="unit">ms</span></div><button class="apply" data-apply-key="scan_interval_playing_ms">Apply</button></div>
-            <div class="setrow"><span class="l">Scan interval in menus / idle</span><div class="val"><input class="inp" data-num-key="scan_interval_idle_ms" /><span class="unit">ms</span></div><button class="apply" data-apply-key="scan_interval_idle_ms">Apply</button></div>
-            <div class="setrow"><span class="l">Live preview refresh interval</span><div class="val"><input class="inp" data-num-key="preview_interval_ms" /><span class="unit">ms</span></div><button class="apply" data-apply-key="preview_interval_ms">Apply</button></div>
-            <div class="setrow"><span class="l">Screen test duration</span><div class="val"><input class="inp" data-num-key="test_duration_s" /><span class="unit">sec</span></div><button class="apply" data-apply-key="test_duration_s">Apply</button></div>
+            <div class="togrow"><span>Enable screen percentage watching</span><button type="button" class="toggle" data-bool-key="watch_enabled" aria-label="Enable screen percentage watching"></button></div>
+            <div class="setrow"><span class="l">Scan interval while playing</span><div class="val"><input class="inp" data-num-key="scan_interval_playing_ms" /><span class="unit">ms</span></div><button type="button" class="apply" data-apply-key="scan_interval_playing_ms">Apply</button></div>
+            <div class="setrow"><span class="l">Scan interval in menus / idle</span><div class="val"><input class="inp" data-num-key="scan_interval_idle_ms" /><span class="unit">ms</span></div><button type="button" class="apply" data-apply-key="scan_interval_idle_ms">Apply</button></div>
+            <div class="setrow"><span class="l">Live preview refresh interval</span><div class="val"><input class="inp" data-num-key="preview_interval_ms" /><span class="unit">ms</span></div><button type="button" class="apply" data-apply-key="preview_interval_ms">Apply</button></div>
+            <div class="setrow"><span class="l">Screen test duration</span><div class="val"><input class="inp" data-num-key="test_duration_s" /><span class="unit">sec</span></div><button type="button" class="apply" data-apply-key="test_duration_s">Apply</button></div>
           </section>
 
           <section class="card">
-            <h2>Discord &amp; hotkeys</h2>
-            <p class="cap">Automatic deafen and the cooldown between toggles.</p>
+            <h2>Discord &amp; experimental</h2>
+            <p class="cap">Auto-deafen cooldown and beta features.</p>
 
-            <div class="togrow"><span>Enable Discord auto-deafen</span><button class="toggle" data-bool-key="auto_deafen" aria-label="Enable Discord auto-deafen"></button></div>
-            <div class="setrow"><span class="l">Discord hotkey toggle cooldown</span><div class="val"><input class="inp" data-num-key="discord_cooldown_ms" /><span class="unit">ms</span></div><button class="apply" data-apply-key="discord_cooldown_ms">Apply</button></div>
-
-            <p class="set-note">Set the same Toggle Deafen keybind in Discord and in GD Quiet so both stay in sync.</p>
+            <div class="togrow"><span>Enable Discord auto-deafen</span><button type="button" class="toggle" data-bool-key="auto_deafen" aria-label="Enable Discord auto-deafen"></button></div>
+            <div class="setrow"><span class="l">Discord hotkey toggle cooldown</span><div class="val"><input class="inp" data-num-key="discord_cooldown_ms" /><span class="unit">ms</span></div><button type="button" class="apply" data-apply-key="discord_cooldown_ms">Apply</button></div>
+            <div class="togrow">
+              <div><span>Detect level names (beta)</span><span class="sub-desc">Reads pause-screen level titles locally for per-level profiles.</span></div>
+              <button type="button" class="toggle" data-bool-key="level_detection_beta" aria-label="Detect level names"></button>
+            </div>
           </section>
 
           <section class="card">
             <h2>Window &amp; updates</h2>
-            <p class="cap">How GD Quiet behaves on your desktop.</p>
+            <p class="cap">Desktop behavior and update channel.</p>
 
-            <div class="togrow"><span>Always on top</span><button class="toggle" data-bool-key="always_on_top" aria-label="Always on top"></button></div>
-            <div class="togrow"><span>Start minimized</span><button class="toggle" data-bool-key="start_minimized" aria-label="Start minimized"></button></div>
-            <div class="togrow"><span>Close to system tray</span><button class="toggle" data-bool-key="close_to_tray" aria-label="Close to system tray"></button></div>
-            <div class="togrow"><span>Automatically check for updates</span><button class="toggle" data-bool-key="auto_check_updates" aria-label="Automatically check for updates"></button></div>
-            <div class="togrow"><span>Beta updates &ndash; opt in</span><button class="toggle" data-bool-key="beta_updates" aria-label="Beta updates opt in"></button></div>
-          </section>
-
-          <section class="card">
-            <h2>Experimental features</h2>
-            <p class="cap">Early features that may still change.</p>
-
-            <div class="togrow"><span>Detect level names</span><button class="toggle" data-bool-key="level_detection_beta" aria-label="Detect level names"></button></div>
-
-            <p class="set-note">Level detection is in beta. It reads the level name from the pause screen and stores corrections locally.</p>
-          </section>
-
-          <section class="card">
-            <h2>Local settings</h2>
-            <p class="cap">Where your configuration lives.</p>
-
-            <p class="set-note" style="margin-top:4px">Every setting on this page saves automatically to a local config file on this PC. Nothing is uploaded, and no account is required.</p>
-            <p class="set-note">Resetting to defaults restores the original values for audio, capture, hotkeys and window behaviour.</p>
+            <div class="togrow"><span>Always on top</span><button type="button" class="toggle" data-bool-key="always_on_top" aria-label="Always on top"></button></div>
+            <div class="togrow"><span>Start minimized</span><button type="button" class="toggle" data-bool-key="start_minimized" aria-label="Start minimized"></button></div>
+            <div class="togrow"><span>Close to system tray</span><button type="button" class="toggle" data-bool-key="close_to_tray" aria-label="Close to system tray"></button></div>
+            <div class="togrow"><span>Automatically check for updates</span><button type="button" class="toggle" data-bool-key="auto_check_updates" aria-label="Automatically check for updates"></button></div>
+            <div class="togrow">
+              <div><span>Beta updates (opt in)</span><span class="sub-desc">Receive prerelease beta versions when checking for updates.</span></div>
+              <button type="button" class="toggle" data-bool-key="beta_updates" aria-label="Beta updates opt in"></button>
+            </div>
+            <div class="btnrow">
+              <button type="button" class="btn ghost sm" id="settings-check-updates-btn">Check for updates now</button>
+            </div>
           </section>
 
           <section class="card span2">
@@ -565,30 +534,27 @@
 
             <span class="okbadge off" id="obs-status-badge"><span class="dot"></span><span id="obs-status-txt">Stopped</span></span>
 
-            <div class="grouplabel">BROWSER SOURCE URL</div>
+            <div class="grouplabel">Browser source URL</div>
             <div class="urlrow">
               <input class="inp" id="obs-url-input" value="" readonly aria-label="Browser source URL" />
-              <button class="btn ghost" id="obs-copy-btn">Copy URL</button>
+              <button type="button" class="btn ghost" id="obs-copy-btn">Copy URL</button>
             </div>
 
             <div class="btnrow">
-              <button class="btn ghost" id="obs-toggle-btn">Enable OBS overlay</button>
-              <button class="btn ghost" id="obs-preview-btn">
-                Preview overlay
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M7 17 17 7M9 7h8v8"/></svg>
-              </button>
+              <button type="button" class="btn ghost" id="obs-toggle-btn">Enable OBS overlay</button>
+              <button type="button" class="btn ghost" id="obs-preview-btn">Preview overlay</button>
             </div>
           </section>
 
-          <section class="card">
+          <section class="card span2">
             <h2>Config &amp; data</h2>
-            <p class="cap">Open your settings folder or reset to defaults.</p>
+            <p class="cap">All settings save automatically to this local file on your PC.</p>
 
             <div class="path" id="config-path-box"></div>
 
             <div class="btnrow">
-              <button class="btn ghost" id="open-config-btn">Open config folder</button>
-              <button class="btn danger" id="reset-defaults-btn">Reset all settings to defaults</button>
+              <button type="button" class="btn ghost" id="open-config-btn">Open config folder</button>
+              <button type="button" class="btn danger" id="reset-defaults-btn">Reset all settings to defaults</button>
             </div>
           </section>
         </div>
