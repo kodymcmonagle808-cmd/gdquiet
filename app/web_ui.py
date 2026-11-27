@@ -1670,7 +1670,7 @@ def run_web_app() -> None:
         shadow=True,
         minimized=bool(app.cfg.get("start_minimized", False)),
         on_top=bool(app.cfg.get("always_on_top", False)),
-        background_color="#1e1f22",
+        background_color="#1a1b1e",
     )
     if window is not None:
         app.attach_window(window)

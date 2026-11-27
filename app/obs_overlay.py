@@ -17,27 +17,28 @@ OVERLAY_HTML = """<!doctype html>
 <style>
 :root{
   color-scheme:dark;
-  --bg:#1e1f22;
-  --bar:#18191c;
-  --sunken:#141518;
-  --ctrl:#2e3037;
-  --ctrl-hover:#373a42;
-  --line:#31333a;
-  --line2:#3e414a;
-  --ink:#eceef2;
-  --muted:#a1a6b3;
-  --faint:#757a87;
-  --accent:#4c7dd9;
-  --accent-hover:#5b8be4;
-  --green:#4ea864;
-  --amber:#d4a23b;
-  --red:#d95b57;
+  --bg:#1a1b1e;
+  --bar:#141518;
+  --sunken:#121316;
+  --ctrl:#2a2d33;
+  --ctrl-hover:#343840;
+  --line:#2e3138;
+  --line2:#3b3f48;
+  --ink:#eceff4;
+  --muted:#a5abb8;
+  --faint:#767c8a;
+  --accent:#2d7e8f;
+  --accent-hover:#3591a4;
+  --accent-ink:#82d1e0;
+  --green:#4fb06d;
+  --amber:#d9a441;
+  --red:#d9625d;
   --mono:"Cascadia Mono",Consolas,ui-monospace,monospace;
   font-family:"Segoe UI Variable","Segoe UI",system-ui,sans-serif;
 }
 *{box-sizing:border-box}
 body{margin:0;padding:12px;background:transparent;color:var(--ink)}
-.panel{max-width:520px;background:var(--bg);border:1px solid var(--line2);border-radius:2px;overflow:hidden}
+.panel{max-width:520px;background:var(--bg);border:1px solid var(--line2);border-radius:2px;box-shadow:inset 0 1px 0 rgba(255,255,255,.04),0 4px 16px rgba(0,0,0,.4);overflow:hidden}
 .top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 12px;background:var(--bar);border-bottom:1px solid var(--line)}
 .brand{font-size:11.5px;font-weight:600;letter-spacing:.04em;color:var(--muted)}
 .state{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:var(--green)}
@@ -48,22 +49,23 @@ body{margin:0;padding:12px;background:transparent;color:var(--ink)}
 .reading{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:10px}
 .percent{font-family:var(--mono);font-size:40px;line-height:1;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ink)}
 .reading-label{font-size:12px;color:var(--faint)}
-.meter{position:relative;height:6px;border-radius:1px;background:var(--sunken);border:1px solid var(--line);overflow:hidden}
-.fill{height:100%;width:0;background:var(--accent);transition:width .16s linear}
+.meter{position:relative;height:7px;border-radius:1px;background:var(--sunken);border:1px solid var(--line);box-shadow:inset 0 1px 2px rgba(0,0,0,.35);overflow:visible}
+.fill{height:100%;width:0;background:var(--accent-ink);transition:width .16s linear}
 .panel.is-muted .fill{background:var(--red)}
+.thresh-tick{position:absolute;top:-2px;bottom:-2px;left:50%;width:2px;background:var(--ink);opacity:.75;transform:translateX(-1px);pointer-events:none}
 .details{display:flex;justify-content:space-between;gap:10px;margin-top:9px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
 .details strong{color:var(--ink);font-weight:600}
 .controls{display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--bar);border-top:1px solid var(--line)}
 button{border:1px solid var(--line2);border-radius:2px;height:26px;padding:0 10px;background:var(--ctrl);color:var(--ink);
 font:inherit;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap}
 button:hover{background:var(--ctrl-hover)}
-button.primary{background:var(--accent);border-color:rgba(255,255,255,.08);color:#fff}
+button.primary{background:var(--accent);border-color:#256674;box-shadow:inset 0 1px 0 rgba(255,255,255,.16);color:#fff}
 button.primary:hover{background:var(--accent-hover)}
 .threshold-label{white-space:nowrap;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
 .threshold-label strong{color:var(--ink);font-weight:600}
 .threshold{-webkit-appearance:none;appearance:none;flex:1;min-width:90px;height:16px;background:transparent;cursor:pointer}
-.threshold::-webkit-slider-runnable-track{height:3px;border-radius:1px;background:var(--line2)}
-.threshold::-webkit-slider-thumb{-webkit-appearance:none;width:9px;height:14px;border-radius:2px;background:#eceef2;border:1px solid var(--line2);margin-top:-5.5px}
+.threshold::-webkit-slider-runnable-track{height:4px;border-radius:1px;background:var(--line2)}
+.threshold::-webkit-slider-thumb{-webkit-appearance:none;width:9px;height:14px;border-radius:2px;background:#eceff4;border:1px solid #2b2f38;margin-top:-5px}
 .error{display:none;padding:7px 12px;border-top:1px solid var(--line);background:#2b1b1c;color:#efb0ae;font-size:11.5px}
 </style>
 </head>
@@ -78,7 +80,7 @@ button.primary:hover{background:var(--accent-hover)}
       <div id="percent" class="percent">--%</div>
       <div class="reading-label">Geometry Dash progress</div>
     </div>
-    <div class="meter"><div id="fill" class="fill"></div></div>
+    <div class="meter"><div id="fill" class="fill"></div><div id="thresh-tick" class="thresh-tick"></div></div>
     <div class="details">
       <span>Threshold: <strong id="threshold-text">--%</strong></span>
       <span id="watch-text">Connecting...</span>
@@ -107,6 +109,7 @@ async function refresh(){
     byId('panel').classList.toggle('is-muted',Boolean(data.muted));
     byId('percent').textContent=pct===null?'--%':`${pct.toFixed(1)}%`;
     byId('fill').style.width=pct===null?'0%':`${pct}%`;
+    byId('thresh-tick').style.left=`${Math.max(0,Math.min(100,threshold))}%`;
     byId('threshold-text').textContent=`${threshold.toFixed(0)}%`;
     if(document.activeElement!==byId('threshold')){
       byId('threshold').value=String(threshold);

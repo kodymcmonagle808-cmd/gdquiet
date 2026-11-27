@@ -134,14 +134,17 @@
 
     const W = 600;
     const H = 210;
-    let html = "";
+    let html = `<defs><linearGradient id="chartFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#82d1e0" stop-opacity="0.18"/><stop offset="100%" stop-color="#82d1e0" stop-opacity="0.01"/></linearGradient></defs>`;
     let pts = [];
     const flush = () => {
       if (pts.length >= 2) {
         const d = pts.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
-        html += `<polyline fill="none" stroke="#5b8be4" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" points="${d}" />`;
+        const firstX = pts[0][0].toFixed(1);
+        const lastX = pts[pts.length - 1][0].toFixed(1);
+        html += `<polygon fill="url(#chartFill)" points="${firstX},${H} ${d} ${lastX},${H}" />`;
+        html += `<polyline fill="none" stroke="#82d1e0" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" points="${d}" />`;
       } else if (pts.length === 1) {
-        html += `<circle cx="${pts[0][0].toFixed(1)}" cy="${pts[0][1].toFixed(1)}" r="2.4" fill="#5b8be4" />`;
+        html += `<circle cx="${pts[0][0].toFixed(1)}" cy="${pts[0][1].toFixed(1)}" r="2.4" fill="#82d1e0" />`;
       }
       pts = [];
     };
@@ -234,7 +237,7 @@
 
         const actTxt = isSel ? (audioMode === "duck" ? "Will duck" : "Will mute") : "Select";
         return `
-          <div class="trow" data-proc="${escapeHtml(t.process_name)}">
+          <div class="trow ${isSel ? "is-selected" : ""}" data-proc="${escapeHtml(t.process_name)}">
             <div class="app-cell">
               <span class="tile ${meta.cls}">${meta.svg}</span>
               <div style="min-width:0">
@@ -808,8 +811,9 @@
       const proc = row.dataset.proc;
       if (!proc) return;
       const actBtn = row.querySelector(".act");
+      const nextOn = !row.classList.contains("is-selected");
+      row.classList.toggle("is-selected", nextOn);
       if (actBtn) {
-        const nextOn = !actBtn.classList.contains("on");
         actBtn.classList.toggle("on", nextOn);
         const mode = latestState && latestState.cfg && latestState.cfg.audio_mode === "duck" ? "duck" : "mute";
         actBtn.textContent = nextOn ? (mode === "duck" ? "Will duck" : "Will mute") : "Select";

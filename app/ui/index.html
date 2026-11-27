@@ -134,7 +134,7 @@
                 </div>
                 <div class="slider-wrap">
                   <input type="range" id="ov-threshold" min="0" max="100" value="50" style="--fill:50%" aria-label="Mute threshold" />
-                  <div class="scale"><span>0%</span><span>50%</span><span>100%</span></div>
+                  <div class="scale"><span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span></div>
                 </div>
               </div>
 
@@ -475,8 +475,8 @@
             <div class="panel-title">Trigger &amp; muting</div>
             <div class="panel pad-rows">
               <div class="setrow"><span class="l">Audio action threshold</span><div class="val"><input class="inp" data-num-key="mute_at_percent" /><span class="unit">%</span></div><button type="button" class="apply" data-apply-key="mute_at_percent">Apply</button></div>
-              <div class="setrow"><span class="l">Audio action</span><div class="val"><select class="inp" id="set-audio-mode"><option value="mute">Mute</option><option value="duck">Duck</option></select></div><button type="button" class="apply" id="set-apply-audio-mode">Apply</button></div>
-              <div class="setrow"><span class="l">Fade before threshold</span><div class="val"><select class="inp" id="set-fade-mode"><option value="off">Off</option><option value="slow">Slow (15%)</option><option value="fast">Fast (5%)</option></select></div><button type="button" class="apply" id="set-apply-fade-mode">Apply</button></div>
+              <div class="setrow"><span class="l">Audio action</span><div class="val"><div class="select-sm"><select class="inp" id="set-audio-mode"><option value="mute">Mute</option><option value="duck">Duck</option></select><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 6l4 4 4-4"/></svg></div></div><button type="button" class="apply" id="set-apply-audio-mode">Apply</button></div>
+              <div class="setrow"><span class="l">Fade before threshold</span><div class="val"><div class="select-sm"><select class="inp" id="set-fade-mode"><option value="off">Off</option><option value="slow">Slow (15%)</option><option value="fast">Fast (5%)</option></select><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 6l4 4 4-4"/></svg></div></div><button type="button" class="apply" id="set-apply-fade-mode">Apply</button></div>
               <div class="setrow"><span class="l">Ducked app volume</span><div class="val"><input class="inp" data-num-key="ducking_volume" /><span class="unit">%</span></div><button type="button" class="apply" data-apply-key="ducking_volume">Apply</button></div>
               <div class="setrow"><span class="l">Restore delay after death / exit</span><div class="val"><input class="inp" data-num-key="missing_timeout_s" /><span class="unit">sec</span></div><button type="button" class="apply" data-apply-key="missing_timeout_s">Apply</button></div>
               <div class="setrow"><span class="l">Re-enforce interval (new streams)</span><div class="val"><input class="inp" data-num-key="remute_interval_s" /><span class="unit">sec</span></div><button type="button" class="apply" data-apply-key="remute_interval_s">Apply</button></div>
