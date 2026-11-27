@@ -522,31 +522,32 @@ class GDQuietTests(unittest.TestCase):
         # 0% death also needs 2 consecutive frames (avoids 1-frame OCR glitch)
         self.assertEqual(deb.update(0.0, 50.0, True, now=1.2), (True, True))
         self.assertEqual(deb.update(0.0, 50.0, True, now=1.25), (False, True))
-        # Sudden jump from 0 -> 88 requires 2 consecutive frames to ignore 1-frame OCR glitch
-        self.assertEqual(deb.update(88.0, 50.0, True, now=1.3), (False, True))
-        self.assertEqual(deb.update(12.0, 50.0, True, now=1.4), (False, True))
-        # Two consecutive high frames mute
-        self.assertEqual(deb.update(60.0, 50.0, True, now=1.5), (False, True))
+        # Jump from 0 -> 88 now mutes instantly (muting is always 1-frame)
+        self.assertEqual(deb.update(88.0, 50.0, True, now=1.3), (True, True))
+        self.assertEqual(deb.update(12.0, 50.0, True, now=1.4), (True, True))
+        # Already muted, stays muted
+        self.assertEqual(deb.update(60.0, 50.0, True, now=1.5), (True, True))
         self.assertEqual(deb.update(61.0, 50.0, True, now=1.6), (True, True))
         # Reaching 100% unmutes if enabled
         self.assertEqual(deb.update(100.0, 50.0, True, now=1.7), (False, True))
         # Missing percent past timeout unmutes
-        self.assertEqual(deb.update(62.0, 50.0, True, now=2.0), (False, True))
-        self.assertEqual(deb.update(63.0, 50.0, True, now=2.1), (True, True))
+        self.assertEqual(deb.update(62.0, 50.0, True, now=2.0), (True, True))
         self.assertEqual(deb.update(None, 50.0, True, now=2.2), (True, True))
         self.assertEqual(deb.update(None, 50.0, True, now=3.2), (False, False))
 
     def test_percent_debouncer_keeps_threshold_confirmation_across_brief_ocr_gap(self) -> None:
         deb = screen_reader.PercentStateDebouncer(missing_timeout_s=0.6)
         self.assertEqual(deb.update(20.0, 50.0, True, now=1.0), (False, True))
-        self.assertEqual(deb.update(75.0, 50.0, True, now=1.1), (False, True))
-        self.assertEqual(deb.update(None, 50.0, True, now=1.2), (False, True))
+        # Above threshold mutes immediately now (1-frame)
+        self.assertEqual(deb.update(75.0, 50.0, True, now=1.1), (True, True))
+        self.assertEqual(deb.update(None, 50.0, True, now=1.2), (True, True))
         self.assertEqual(deb.update(76.0, 50.0, True, now=1.3), (True, True))
 
     def test_percent_debouncer_reports_unmuted_after_missing_timeout(self) -> None:
         deb = screen_reader.PercentStateDebouncer(missing_timeout_s=0.6)
         self.assertEqual(deb.update(20.0, 50.0, True, now=1.0), (False, True))
-        self.assertEqual(deb.update(51.0, 50.0, True, now=1.1), (False, True))
+        # Above threshold mutes immediately now (1-frame)
+        self.assertEqual(deb.update(51.0, 50.0, True, now=1.1), (True, True))
         self.assertEqual(deb.update(52.0, 50.0, True, now=1.2), (True, True))
         self.assertEqual(deb.update(None, 50.0, True, now=2.3), (False, False))
 

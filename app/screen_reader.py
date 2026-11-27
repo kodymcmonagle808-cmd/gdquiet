@@ -461,14 +461,12 @@ class PercentStateDebouncer:
         self.is_muted = False
         self.last_percent: float | None = None
         self.last_seen_at = 0.0
-        self._high_streak = 0
         self._low_streak = 0
 
     def reset(self) -> None:
         self.is_muted = False
         self.last_percent = None
         self.last_seen_at = 0.0
-        self._high_streak = 0
         self._low_streak = 0
 
     def update(
@@ -501,13 +499,11 @@ class PercentStateDebouncer:
         self.last_percent = percent
 
         if unmute_at_100 and percent >= 99.95:
-            self._high_streak = 0
             self._low_streak = 0
             self.is_muted = False
             return False, True
 
         if percent < threshold:
-            self._high_streak = 0
             self._low_streak += 1
             # Require 2 consecutive below-threshold frames to unmute (avoids 1-frame OCR glitches including false 0%).
             if not self.is_muted or self._low_streak >= 2:
@@ -515,13 +511,11 @@ class PercentStateDebouncer:
             return self.is_muted, True
 
         self._low_streak = 0
-        # percent >= threshold: accept immediately on smooth progression, or 2 consecutive frames on a jump.
-        smooth_cross = prev is not None and (threshold - 15.0) <= prev <= percent <= (prev + 15.0)
-        self._high_streak += 1
-        if self.is_muted or smooth_cross or self._high_streak >= 2:
-            self.is_muted = True
+        # percent >= threshold: mute immediately (1 frame).  The 2-frame guard
+        # is only used for *un*muting to avoid false unmutes from OCR glitches.
+        self.is_muted = True
 
-        return self.is_muted, True
+        return True, True
 
 
 @dataclass

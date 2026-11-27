@@ -14,12 +14,11 @@ from functools import cmp_to_key
 from pathlib import Path
 from typing import Callable
 
-APP_VERSION = "4.4.3-beta.1"
+APP_VERSION = "4.4.3"
 PATCH_NOTES = """\
-- Fixed false unmute/undeafen blips during gameplay caused by brief OCR gaps
-- Extended missing-percent hold timeout to 1 second when muted
-- Requires 2 consecutive below-threshold OCR frames before unmuting
-- Fixed capture preview flickering in the UI
+- Muting is now instant (1 frame) when percent crosses above your threshold
+- Unmuting still requires 2 consecutive below-threshold frames (prevents false unmutes)
+- Real patch notes now show in the update banner instead of install instructions
 """.strip()
 GITHUB_REPO = "kodymcmonagle808-cmd/gdquiet"
 RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
