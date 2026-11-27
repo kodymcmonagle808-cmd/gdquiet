@@ -15,6 +15,12 @@ from pathlib import Path
 from typing import Callable
 
 APP_VERSION = "4.4.3-beta.1"
+PATCH_NOTES = """\
+- Fixed false unmute/undeafen blips during gameplay caused by brief OCR gaps
+- Extended missing-percent hold timeout to 1 second when muted
+- Requires 2 consecutive below-threshold OCR frames before unmuting
+- Fixed capture preview flickering in the UI
+""".strip()
 GITHUB_REPO = "kodymcmonagle808-cmd/gdquiet"
 RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 RELEASES_LIST_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"

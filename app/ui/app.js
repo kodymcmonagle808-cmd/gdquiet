@@ -401,7 +401,14 @@
       $("update-banner-txt").textContent = `New version v${state.pending_update.latest_version} is available (current: v${state.app_version}).`;
       const notesEl = $("update-banner-notes");
       if (notesEl) {
-        const notes = (state.pending_update.release_notes || "").trim();
+        let notes = (state.pending_update.release_notes || "").trim();
+        // Strip the generic install instructions section so only real patch notes show
+        const installIdx = notes.indexOf("### Install GD Quiet");
+        if (installIdx > 0) {
+          notes = notes.substring(0, installIdx).replace(/\n---\s*$/, "").trim();
+        } else if (installIdx === 0) {
+          notes = "";  // entire body is install instructions, no patch notes
+        }
         if (notes) {
           notesEl.textContent = notes;
           notesEl.style.display = "block";

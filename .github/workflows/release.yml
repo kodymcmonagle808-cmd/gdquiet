@@ -43,12 +43,18 @@ jobs:
           }
           & $iscc "/DMyAppVersion=$ver" installer/gdquiet.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Extract patch notes
+        shell: pwsh
+        run: |
+          $notes = python -c "import sys; sys.path.insert(0, 'app'); from updater import PATCH_NOTES; print(PATCH_NOTES)"
+          $notes | Out-File -FilePath dist/patch_notes.txt -Encoding utf8
       - uses: actions/upload-artifact@v4
         with:
           name: app
           path: |
             dist/GDQuiet-Setup.exe
             dist/GDQuiet.exe
+            dist/patch_notes.txt
 
   release:
     needs: [app]
@@ -60,14 +66,31 @@ jobs:
         with:
           merge-multiple: true
           path: out
+      - name: Build release body
+        shell: bash
+        run: |
+          NOTES=""
+          if [ -f out/patch_notes.txt ]; then
+            NOTES=$(cat out/patch_notes.txt)
+          fi
+          {
+            if [ -n "$NOTES" ]; then
+              echo "### What's New"
+              echo ""
+              echo "$NOTES"
+              echo ""
+            fi
+            echo "---"
+            echo ""
+            echo "### Install GD Quiet"
+            echo "Download and run **\`GDQuiet-Setup.exe\`** to open the Windows Setup Wizard (review and accept terms, choose your install location and shortcuts, then launch GD Quiet)."
+            echo ""
+            echo "\`GDQuiet.exe\` is also attached for legacy \`v3.0.7\`–\`v3.1.0\` in-app updaters (\`v3.1.1+\` automatically prefer \`GDQuiet-Setup.exe\`)."
+          } > out/release_body.md
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
-          body: |
-            ### Install GD Quiet
-            Download and run **`GDQuiet-Setup.exe`** to open the Windows Setup Wizard (review and accept terms, choose your install location and shortcuts, then launch GD Quiet).
-
-            `GDQuiet.exe` is also attached for legacy `v3.0.7`–`v3.1.0` in-app updaters (`v3.1.1+` automatically prefer `GDQuiet-Setup.exe`).
+          body_path: out/release_body.md
           prerelease: ${{ contains(github.ref_name, '-beta.') }}
           files: |
             out/GDQuiet-Setup.exe
