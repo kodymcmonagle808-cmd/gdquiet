@@ -893,6 +893,7 @@ class GDQuietTests(unittest.TestCase):
         self.assertTrue(updater.is_newer_version("v4.0.0-beta.1", "3.1.8"))
         self.assertTrue(updater.is_newer_version("v4.0.0-beta.2", "v4.0.0-beta.1"))
         self.assertTrue(updater.is_newer_version("v4.0.0", "v4.0.0-beta.1"))
+        self.assertTrue(updater.is_newer_version("v4.0.0", "v4.0.0-beta.2"))
         self.assertFalse(updater.is_newer_version("v4.0.0-beta.1", "v4.0.0"))
 
         # Setup Wizard asset should be selected cleanly and marked as an installer
