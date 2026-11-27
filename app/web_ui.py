@@ -1067,8 +1067,8 @@ class GDQuietWebApp:
                     self.test_session.stop()
                     testing = False
 
-        if reading.detected_level_name and self.cfg.get("level_detection_beta", False):
-            raw_name = reading.detected_level_name.strip()
+        if reading.level_name_candidate and self.cfg.get("level_detection_beta", False):
+            raw_name = reading.level_name_candidate.strip()
             if raw_name:
                 raw_key = normalize_level_name(raw_name)
                 with self.cfg_lock:

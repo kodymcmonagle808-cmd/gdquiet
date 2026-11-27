@@ -263,6 +263,40 @@ class AudioMuteController:
         """Unmute any audio sessions previously muted by this controller."""
         self.apply([], mute=False)
 
+    def restore_process(self, proc_name: str) -> None:
+        """Restore (unmute/unduck) audio sessions for a single process."""
+        target = proc_name.lower().strip()
+        if not target:
+            return
+        with self._lock:
+            with com_scope():
+                try:
+                    sessions = AudioUtilities.GetAllSessions()
+                except Exception:
+                    return
+                for session in sessions:
+                    try:
+                        if not session.Process:
+                            continue
+                        name = session.Process.name().lower()
+                        if name != target:
+                            continue
+                        pid = int(session.Process.pid)
+                        key = self._session_key(session, name, pid)
+                        self._restore_session(key, session.SimpleAudioVolume)
+                    except Exception:
+                        continue
+                self._is_muted = bool(self._muted_sessions)
+
+    def set_duck_volume(
+        self,
+        selected_processes: Iterable[str],
+        volume_percent: float,
+        force: bool = False,
+    ) -> None:
+        """Duck selected apps to `volume_percent` (0-100). Like apply(…, duck_to=…) but re-applies on `force`."""
+        self.apply(selected_processes, mute=True, duck_to=volume_percent)
+
     @staticmethod
     def _session_key(session: Any, proc_name: str, pid: int) -> tuple[str, int, str]:
         inst_id = str(getattr(session, "InstanceIdentifier", "") or "")
@@ -273,6 +307,7 @@ class AudioMuteController:
         selected_processes: Iterable[str],
         mute: bool,
         duck_to: float | None = None,
+        force: bool = False,
     ) -> None:
         selected = {p.lower().strip() for p in selected_processes if p and p.strip()}
         selected -= EXCLUDED_PROCESSES
