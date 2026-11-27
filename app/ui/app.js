@@ -6,13 +6,18 @@
   let resetArmed = false;
   let resetTimer = null;
   let pollTimer = null;
+  let mutationEpoch = 0;
+  let activeMutations = 0;
+  let activeSlider = null;
 
   const $ = (id) => document.getElementById(id);
 
   function setSliderFill(el, value) {
-    if (!el) return;
+    if (!el || activeSlider === el) return;
     const pct = Math.max(0, Math.min(100, Number(value) || 0));
-    el.value = pct;
+    if (Number(el.value) !== pct) {
+      el.value = pct;
+    }
     el.style.setProperty("--fill", pct + "%");
   }
 
@@ -28,6 +33,22 @@
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
+  }
+
+  async function mutate(fn) {
+    if (!api()) return null;
+    mutationEpoch += 1;
+    const myEpoch = mutationEpoch;
+    activeMutations += 1;
+    try {
+      const st = await fn(api());
+      if (st && myEpoch === mutationEpoch) {
+        applyState(st);
+      }
+      return st;
+    } finally {
+      activeMutations = Math.max(0, activeMutations - 1);
+    }
   }
 
   function tileMeta(procName, displayName) {
@@ -82,11 +103,18 @@
     const threshLbl = $("test-thresh-lbl");
     const thresh = Math.max(0, Math.min(100, Number(threshold) || 0));
 
-    threshLine.style.bottom = thresh + "%";
-    threshLbl.textContent = `${Math.round(thresh)}% THRESHOLD`;
+    if (!activeSlider) {
+      threshLine.style.bottom = thresh + "%";
+      threshLbl.textContent = `${Math.round(thresh)}% THRESHOLD`;
+    }
 
     const samples = (testData && testData.samples) || [];
     const duration = Math.max(1, Number((testData && testData.duration_s) || 30));
+    const lastSample = samples.length ? samples[samples.length - 1] : null;
+    const sig = `${samples.length}:${duration}:${lastSample ? lastSample[0] + "," + lastSample[1] : ""}`;
+    if (svg.dataset.sig === sig) return;
+    svg.dataset.sig = sig;
+
     if (!samples.length) {
       svg.innerHTML = "";
       empty.style.display = "grid";
@@ -138,7 +166,9 @@
     $("apps-sum-desc").textContent = `These apps will ${audioMode} after ${pct}%. Their audio returns when the run ends.`;
     $("apps-sum-thresh").textContent = `${pct}%`;
     $("apps-sum-label").textContent = audioMode === "duck" ? "DUCK THRESHOLD" : "MUTE THRESHOLD";
-    $("apps-bg-check").checked = Boolean(cfg.show_background_audio);
+    if (document.activeElement !== $("apps-bg-check")) {
+      $("apps-bg-check").checked = Boolean(cfg.show_background_audio);
+    }
 
     const targets = (state.targets || []).filter((t) => {
       if (!query) return true;
@@ -151,6 +181,17 @@
 
     const body = $("apps-list-body");
     $("apps-count-foot").textContent = `${targets.length} ${targets.length === 1 ? "window" : "windows"} found`;
+
+    const sig = JSON.stringify({
+      q: query,
+      mode: audioMode,
+      sel: Array.from(selected).sort(),
+      rows: targets.map((t) => [t.process_name, t.display_name, t.window_titles, t.has_audio, t.currently_muted]),
+    });
+    if (body.dataset.sig === sig) {
+      return;
+    }
+    body.dataset.sig = sig;
 
     if (!targets.length) {
       body.innerHTML = `<div class="list-empty">${
@@ -192,21 +233,11 @@
               </div>
             </div>
             <div><span class="pill ${pillCls}"><span class="dot"></span>${pillTxt}</span></div>
-            <button class="act ${isSel ? "on" : ""}">${actTxt}</button>
+            <button type="button" class="act ${isSel ? "on" : ""}">${actTxt}</button>
           </div>
         `;
       })
       .join("");
-
-    body.querySelectorAll(".trow").forEach((row) => {
-      row.addEventListener("click", async () => {
-        const proc = row.dataset.proc;
-        if (!proc || !api()) return;
-        const st = await api().toggle_app(proc);
-        applyState(st);
-        flashSaved();
-      });
-    });
   }
 
   function applyRegionBoxPosition(cfg) {
@@ -227,7 +258,6 @@
         box.style.top = y + "%";
         box.style.height = h + "%";
         lbl.textContent = (reg.preset || "CUSTOM REGION").toUpperCase();
-        box.classList.remove("hide");
       } else {
         box.style.left = "20%";
         box.style.right = "20%";
@@ -235,7 +265,6 @@
         box.style.top = "18%";
         box.style.height = "18%";
         lbl.textContent = "CUSTOM SCREEN";
-        box.classList.remove("hide");
       }
     } else {
       box.style.left = "24%";
@@ -244,7 +273,6 @@
       box.style.top = "8%";
       box.style.height = "15%";
       lbl.textContent = "AUTO · TOP 10%";
-      box.classList.remove("hide");
     }
   }
 
@@ -266,14 +294,17 @@
     $("nav-apps-badge").textContent = String(nApps);
 
     const wHead = $("watcher-head");
-    wHead.className = "watcher-head " + (status.code || "watching");
+    const wantHeadCls = "watcher-head " + (status.code || "watching");
+    if (wHead.className !== wantHeadCls) wHead.className = wantHeadCls;
     $("watcher-state-txt").textContent = status.headline || "WATCHING";
     $("watcher-pct").textContent =
       reading.percent !== null && reading.percent !== undefined ? `${reading.percent.toFixed(1)} %` : "-- %";
     $("watcher-sub").textContent = status.sub || "Waiting for a run";
 
     setSliderFill($("sidebar-threshold"), threshold);
-    $("watcher-thresh").textContent = `${audioMode === "duck" ? "Ducks at" : "Mutes past"} ${threshold}%`;
+    if (activeSlider !== $("sidebar-threshold")) {
+      $("watcher-thresh").textContent = `${audioMode === "duck" ? "Ducks at" : "Mutes past"} ${threshold}%`;
+    }
 
     $("sidebar-watch-txt").textContent = cfg.watch_enabled ? "Pause watching" : "Resume watching";
     const whk = cfg.watch_toggle_hotkey;
@@ -321,7 +352,7 @@
       audioMode === "duck"
         ? "Lower selected app volume when your progress passes the threshold."
         : "Mute selected apps when your progress passes the threshold.";
-    if (document.activeElement !== $("ov-pct-input")) {
+    if (document.activeElement !== $("ov-pct-input") && !activeSlider) {
       $("ov-pct-input").value = String(threshold);
     }
     setSliderFill($("ov-threshold"), threshold);
@@ -352,8 +383,7 @@
     $("ov-level-status").textContent = state.level_detection_status || "";
 
     // 30s test
-    const testBtn = $("test-toggle-btn");
-    testBtn.textContent = test.active ? "Stop test" : "Start 30s test";
+    $("test-toggle-btn").textContent = test.active ? "Stop test" : "Start 30s test";
     $("test-progress-fill").style.width = `${Math.max(0, Math.min(100, (test.ratio || 0) * 100))}%`;
     $("test-status").textContent = test.status_text || "Ready to test";
     $("test-live").textContent =
@@ -366,13 +396,17 @@
 
     const milestones = test.milestones || [];
     const seenList = $("test-seen-list");
-    if (milestones.length) {
-      $("test-seen-empty").style.display = "none";
-      seenList.innerHTML = milestones.map((m) => `<li>${escapeHtml(m)}</li>`).join("");
-      seenList.scrollTop = seenList.scrollHeight;
-    } else {
-      $("test-seen-empty").style.display = "block";
-      seenList.innerHTML = "";
+    const mSig = milestones.length ? `${milestones.length}:${milestones[milestones.length - 1]}` : "0";
+    if (seenList.dataset.sig !== mSig) {
+      seenList.dataset.sig = mSig;
+      if (milestones.length) {
+        $("test-seen-empty").style.display = "none";
+        seenList.innerHTML = milestones.map((m) => `<li>${escapeHtml(m)}</li>`).join("");
+        seenList.scrollTop = seenList.scrollHeight;
+      } else {
+        $("test-seen-empty").style.display = "block";
+        seenList.innerHTML = "";
+      }
     }
 
     const note = $("test-note");
@@ -395,19 +429,20 @@
     }
 
     const dPill = $("deafen-status-pill");
-    dPill.className = "ready";
+    let dCls = "ready";
+    let dTxt = "Disabled";
     if (status.deafened_by_us) {
-      dPill.classList.add("bad");
-      $("deafen-status-txt").textContent = "Deafened by GD Quiet";
+      dCls = "ready bad";
+      dTxt = "Deafened by GD Quiet";
     } else if (cfg.auto_deafen && dhk && dhk.label) {
-      dPill.classList.add("ok");
-      $("deafen-status-txt").textContent = "Auto-undeafen ready";
+      dCls = "ready ok";
+      dTxt = "Auto-undeafen ready";
     } else if (cfg.auto_deafen) {
-      dPill.classList.add("warn");
-      $("deafen-status-txt").textContent = "Set hotkey";
-    } else {
-      $("deafen-status-txt").textContent = "Disabled";
+      dCls = "ready warn";
+      dTxt = "Set hotkey";
     }
+    if (dPill.className !== dCls) dPill.className = dCls;
+    $("deafen-status-txt").textContent = dTxt;
 
     const step3 = $("deafen-step3-badge");
     if (cfg.auto_deafen && dhk && dhk.label) {
@@ -424,12 +459,15 @@
     // Screen capture
     const sel = $("cap-target-select");
     const procs = Array.from(new Set([...(state.open_processes || []), cfg.target_process || "geometrydash.exe"].filter(Boolean)));
-    const curSel = sel.value;
-    const optsHtml = procs.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("");
-    if (sel.innerHTML !== optsHtml) {
-      sel.innerHTML = optsHtml;
+    const procsKey = JSON.stringify(procs);
+    if (sel.dataset.procsKey !== procsKey) {
+      sel.dataset.procsKey = procsKey;
+      sel.innerHTML = procs.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("");
     }
-    sel.value = cfg.target_process || curSel || "geometrydash.exe";
+    const wantTarget = cfg.target_process || "geometrydash.exe";
+    if (document.activeElement !== sel && sel.value !== wantTarget) {
+      sel.value = wantTarget;
+    }
 
     const wBanner = $("cap-watch-banner");
     const watchingOn = Boolean(cfg.watch_enabled);
@@ -442,14 +480,19 @@
 
     const prevImg = $("cap-preview-img");
     const prevPh = $("cap-preview-placeholder");
+    const regionBox = $("cap-region-box");
     if (reading.preview_data_url && watchingOn) {
-      prevImg.src = reading.preview_data_url;
+      if (prevImg.dataset.lastSrc !== reading.preview_data_url) {
+        prevImg.dataset.lastSrc = reading.preview_data_url;
+        prevImg.src = reading.preview_data_url;
+      }
       prevImg.classList.add("show");
       prevPh.classList.add("hide");
-      $("cap-region-box").classList.add("hide");
+      regionBox.classList.add("hide");
     } else {
       prevImg.classList.remove("show");
       prevPh.classList.remove("hide");
+      regionBox.classList.remove("hide");
       $("cap-ph-title").textContent = watchingOn ? "Waiting for capture" : "Capture is paused";
       $("cap-ph-sub").textContent = watchingOn
         ? "Open Geometry Dash to see live screen data."
@@ -460,7 +503,8 @@
       reading.percent !== null && reading.percent !== undefined ? `${reading.percent.toFixed(2)} %` : "-- %";
     $("cap-status-txt").textContent = reading.status_text || (watchingOn ? "Waiting for Geometry Dash..." : "Screen watcher paused");
     $("cap-ocr-diag").textContent = reading.diagnostic || "Raw OCR: (waiting)";
-    $("cap-pill").className = "pill " + (watchingOn ? "active" : "paused");
+    const pillCls = "pill " + (watchingOn ? "active" : "paused");
+    if ($("cap-pill").className !== pillCls) $("cap-pill").className = pillCls;
     $("cap-pill-txt").textContent = watchingOn ? status.headline || "Watching" : "Paused";
 
     const activePreset =
@@ -479,7 +523,7 @@
       if (document.activeElement === inp) return;
       const key = inp.dataset.numKey;
       const val = cfg[key];
-      if (val !== undefined && val !== null) {
+      if (val !== undefined && val !== null && inp.value !== String(val)) {
         inp.value = String(val);
       }
     });
@@ -487,17 +531,20 @@
       const key = tog.dataset.boolKey;
       tog.classList.toggle("on", Boolean(cfg[key]));
     });
-    if (document.activeElement !== $("set-audio-mode")) {
+    if (document.activeElement !== $("set-audio-mode") && $("set-audio-mode").value !== audioMode) {
       $("set-audio-mode").value = audioMode;
     }
-    if (document.activeElement !== $("set-fade-mode")) {
-      $("set-fade-mode").value = cfg.fade_in_mode || "off";
+    const fadeMode = cfg.fade_in_mode || "off";
+    if (document.activeElement !== $("set-fade-mode") && $("set-fade-mode").value !== fadeMode) {
+      $("set-fade-mode").value = fadeMode;
     }
 
     const obsBadge = $("obs-status-badge");
     obsBadge.classList.toggle("off", !obs.running);
     $("obs-status-txt").textContent = obs.status_text || (obs.running ? "Running locally" : "Stopped");
-    $("obs-url-input").value = obs.url || "";
+    if ($("obs-url-input").value !== (obs.url || "")) {
+      $("obs-url-input").value = obs.url || "";
+    }
     $("obs-toggle-btn").textContent = obs.running ? "Stop OBS overlay" : "Enable OBS overlay";
     $("config-path-box").textContent = state.config_path || "";
   }
@@ -530,6 +577,9 @@
 
   function startRecording(target) {
     recordingTarget = target;
+    if (document.activeElement && typeof document.activeElement.blur === "function") {
+      document.activeElement.blur();
+    }
     if (target === "watch") {
       $("ov-record-hk").textContent = "Press keys...";
       $("ov-hk-kbd").textContent = "Listening...";
@@ -560,81 +610,95 @@
       btn.addEventListener("click", () => showPage(btn.dataset.nav));
     });
 
+    // Slider drag tracking so polls never snap the thumb back while dragging
+    const releaseSlider = () => {
+      activeSlider = null;
+    };
+    window.addEventListener("pointerup", releaseSlider);
+    window.addEventListener("mouseup", releaseSlider);
+    window.addEventListener("touchend", releaseSlider);
+
+    [$("sidebar-threshold"), $("ov-threshold")].forEach((slider) => {
+      const startDrag = () => {
+        activeSlider = slider;
+      };
+      slider.addEventListener("pointerdown", startDrag);
+      slider.addEventListener("mousedown", startDrag);
+      slider.addEventListener("touchstart", startDrag);
+    });
+
     // Sidebar controls
     $("sidebar-threshold").addEventListener("input", (e) => {
-      setSliderFill(e.target, e.target.value);
-      setSliderFill($("ov-threshold"), e.target.value);
-      $("ov-pct-input").value = e.target.value;
+      const val = e.target.value;
+      e.target.style.setProperty("--fill", val + "%");
+      setSliderFill($("ov-threshold"), val);
+      $("ov-pct-input").value = val;
       $("watcher-thresh").textContent = `${
         latestState && latestState.cfg && latestState.cfg.audio_mode === "duck" ? "Ducks at" : "Mutes past"
-      } ${e.target.value}%`;
+      } ${val}%`;
+      $("test-thresh-line").style.bottom = val + "%";
+      $("test-thresh-lbl").textContent = `${val}% THRESHOLD`;
     });
     $("sidebar-threshold").addEventListener("change", async (e) => {
-      if (!api()) return;
-      const st = await api().set_threshold(Number(e.target.value));
-      applyState(st);
+      activeSlider = null;
+      await mutate((a) => a.set_threshold(Number(e.target.value)));
       flashSaved();
     });
 
     $("sidebar-watch-btn").addEventListener("click", async () => {
-      if (!api()) return;
-      applyState(await api().toggle_watching());
+      await mutate((a) => a.toggle_watching());
       flashSaved();
     });
     $("sidebar-restore-btn").addEventListener("click", async () => {
-      if (!api()) return;
-      applyState(await api().force_restore_all());
+      await mutate((a) => a.force_restore_all());
     });
     $("sidebar-update-btn").addEventListener("click", async () => {
-      if (!api()) return;
-      applyState(await api().check_or_install_update());
+      await mutate((a) => a.check_or_install_update());
     });
 
     // Banners
     $("update-banner-install").addEventListener("click", async () => {
-      if (!api()) return;
-      applyState(await api().install_pending_update());
+      await mutate((a) => a.install_pending_update());
     });
     $("update-banner-later").addEventListener("click", async () => {
-      if (!api()) return;
-      applyState(await api().dismiss_update_banner());
+      await mutate((a) => a.dismiss_update_banner());
     });
     $("level-yes").addEventListener("click", async () => {
-      if (!api()) return;
-      applyState(await api().confirm_level_candidate());
+      await mutate((a) => a.confirm_level_candidate());
     });
     $("level-correct").addEventListener("click", () => {
       $("level-corr-row").classList.add("show");
       $("level-corr-input").focus();
     });
     $("level-later").addEventListener("click", async () => {
-      if (!api()) return;
-      applyState(await api().dismiss_level_candidate());
+      await mutate((a) => a.dismiss_level_candidate());
     });
     $("level-corr-save").addEventListener("click", async () => {
-      if (!api()) return;
-      applyState(await api().save_level_correction($("level-corr-input").value));
+      await mutate((a) => a.save_level_correction($("level-corr-input").value));
       flashSaved();
     });
 
     // Overview threshold & controls
     $("ov-threshold").addEventListener("input", (e) => {
-      setSliderFill(e.target, e.target.value);
-      setSliderFill($("sidebar-threshold"), e.target.value);
-      $("ov-pct-input").value = e.target.value;
-      $("test-thresh-line").style.bottom = e.target.value + "%";
-      $("test-thresh-lbl").textContent = `${e.target.value}% THRESHOLD`;
+      const val = e.target.value;
+      e.target.style.setProperty("--fill", val + "%");
+      setSliderFill($("sidebar-threshold"), val);
+      $("ov-pct-input").value = val;
+      $("watcher-thresh").textContent = `${
+        latestState && latestState.cfg && latestState.cfg.audio_mode === "duck" ? "Ducks at" : "Mutes past"
+      } ${val}%`;
+      $("test-thresh-line").style.bottom = val + "%";
+      $("test-thresh-lbl").textContent = `${val}% THRESHOLD`;
     });
     $("ov-threshold").addEventListener("change", async (e) => {
-      if (!api()) return;
-      applyState(await api().set_threshold(Number(e.target.value)));
+      activeSlider = null;
+      await mutate((a) => a.set_threshold(Number(e.target.value)));
       flashSaved();
     });
     const commitOvPct = async () => {
-      if (!api()) return;
       const val = parseFloat($("ov-pct-input").value);
       if (Number.isNaN(val)) return;
-      applyState(await api().set_threshold(val));
+      await mutate((a) => a.set_threshold(val));
       flashSaved();
     };
     $("ov-apply-btn").addEventListener("click", commitOvPct);
@@ -643,8 +707,9 @@
     });
 
     $("ov-unmute100-tog").addEventListener("click", async () => {
-      if (!api()) return;
-      applyState(await api().set_setting("unmute_at_100", !(latestState && latestState.cfg && latestState.cfg.unmute_at_100)));
+      const next = !$("ov-unmute100-tog").classList.contains("on");
+      $("ov-unmute100-tog").classList.toggle("on", next);
+      await mutate((a) => a.set_setting("unmute_at_100", next));
       flashSaved();
     });
     $("ov-record-hk").addEventListener("click", () => {
@@ -653,45 +718,56 @@
     });
     $("ov-clear-hk").addEventListener("click", async () => {
       stopRecording(false);
-      if (!api()) return;
-      applyState(await api().clear_watch_hotkey());
+      await mutate((a) => a.clear_watch_hotkey());
       flashSaved();
     });
     $("ov-save-setup").addEventListener("click", async () => {
-      if (!api()) return;
-      applyState(await api().save_setup());
+      await mutate((a) => a.save_setup());
       flashSaved();
     });
     $("ov-pick-spot").addEventListener("click", async () => {
-      if (!api()) return;
-      applyState(await api().pick_region_now());
+      await mutate((a) => a.pick_region_now());
     });
     $("test-toggle-btn").addEventListener("click", async () => {
-      if (!api()) return;
-      applyState(await api().toggle_screen_test());
+      await mutate((a) => a.toggle_screen_test());
     });
 
-    // Apps
+    // Apps (delegated click listener so rows never drop clicks!)
+    $("apps-list-body").addEventListener("click", async (e) => {
+      const row = e.target.closest(".trow");
+      if (!row) return;
+      const proc = row.dataset.proc;
+      if (!proc) return;
+      const actBtn = row.querySelector(".act");
+      if (actBtn) {
+        const nextOn = !actBtn.classList.contains("on");
+        actBtn.classList.toggle("on", nextOn);
+        const mode = latestState && latestState.cfg && latestState.cfg.audio_mode === "duck" ? "duck" : "mute";
+        actBtn.textContent = nextOn ? (mode === "duck" ? "Will duck" : "Will mute") : "Select";
+      }
+      await mutate((a) => a.toggle_app(proc));
+      flashSaved();
+    });
+
     $("apps-search").addEventListener("input", () => latestState && renderApps(latestState));
     $("apps-bg-check").addEventListener("change", async (e) => {
-      if (!api()) return;
-      applyState(await api().set_setting("show_background_audio", e.target.checked));
+      const checked = e.target.checked;
+      await mutate((a) => a.set_setting("show_background_audio", checked));
       flashSaved();
     });
     $("apps-refresh-btn").addEventListener("click", async () => {
-      if (!api()) return;
-      applyState(await api().refresh_windows());
+      await mutate((a) => a.refresh_windows());
     });
     $("apps-clear-btn").addEventListener("click", async () => {
-      if (!api()) return;
-      applyState(await api().clear_selected_apps());
+      await mutate((a) => a.clear_selected_apps());
       flashSaved();
     });
 
     // Discord auto-deafen
     $("deafen-toggle").addEventListener("click", async () => {
-      if (!api()) return;
-      applyState(await api().set_setting("auto_deafen", !(latestState && latestState.cfg && latestState.cfg.auto_deafen)));
+      const next = !$("deafen-toggle").classList.contains("on");
+      $("deafen-toggle").classList.toggle("on", next);
+      await mutate((a) => a.set_setting("auto_deafen", next));
       flashSaved();
     });
     $("deafen-record-btn").addEventListener("click", () => {
@@ -699,13 +775,11 @@
       else startRecording("deafen");
     });
     $("deafen-test-btn").addEventListener("click", async () => {
-      if (!api()) return;
-      applyState(await api().test_deafen_hotkey());
+      await mutate((a) => a.test_deafen_hotkey());
     });
     $("deafen-clear-btn").addEventListener("click", async () => {
       stopRecording(false);
-      if (!api()) return;
-      applyState(await api().clear_deafen_hotkey());
+      await mutate((a) => a.clear_deafen_hotkey());
       flashSaved();
     });
 
@@ -722,27 +796,25 @@
 
     // Screen capture
     $("cap-target-select").addEventListener("change", async (e) => {
-      if (!api()) return;
-      applyState(await api().set_target_process(e.target.value));
+      const val = e.target.value;
+      await mutate((a) => a.set_target_process(val));
       flashSaved();
     });
     $("cap-refresh-btn").addEventListener("click", async () => {
-      if (!api()) return;
-      applyState(await api().refresh_target_windows());
+      await mutate((a) => a.refresh_target_windows());
     });
     document.querySelectorAll("#cap-opts .opt").forEach((btn) => {
       btn.addEventListener("click", async () => {
-        if (!api()) return;
-        applyState(await api().set_region_preset(btn.dataset.preset));
+        document.querySelectorAll("#cap-opts .opt").forEach((o) => o.classList.remove("on"));
+        btn.classList.add("on");
+        await mutate((a) => a.set_region_preset(btn.dataset.preset));
         flashSaved();
       });
     });
     $("cap-drag-btn").addEventListener("click", async () => {
-      if (!api()) return;
-      applyState(await api().pick_region_now());
+      await mutate((a) => a.pick_region_now());
     });
     $("cap-delay-btn").addEventListener("click", async () => {
-      if (!api()) return;
       const btn = $("cap-delay-btn");
       btn.disabled = true;
       for (let s = 3; s >= 1; s--) {
@@ -751,7 +823,7 @@
       }
       btn.textContent = "Pick with 3s delay";
       btn.disabled = false;
-      applyState(await api().pick_region_now());
+      await mutate((a) => a.pick_region_now());
     });
 
     // Settings
@@ -759,49 +831,45 @@
       btn.addEventListener("click", async () => {
         const key = btn.dataset.applyKey;
         const inp = document.querySelector(`#view-settings input[data-num-key="${key}"]`);
-        if (!inp || !api()) return;
+        if (!inp) return;
         const val = parseFloat(inp.value);
         if (Number.isNaN(val)) return;
-        applyState(await api().set_setting(key, val));
+        await mutate((a) => a.set_setting(key, val));
         flashSaved();
       });
     });
     document.querySelectorAll("#view-settings input[data-num-key]").forEach((inp) => {
       inp.addEventListener("keydown", async (e) => {
-        if (e.key !== "Enter" || !api()) return;
+        if (e.key !== "Enter") return;
         const val = parseFloat(inp.value);
         if (Number.isNaN(val)) return;
-        applyState(await api().set_setting(inp.dataset.numKey, val));
+        await mutate((a) => a.set_setting(inp.dataset.numKey, val));
         flashSaved();
       });
     });
     document.querySelectorAll("#view-settings button.toggle[data-bool-key]").forEach((tog) => {
       tog.addEventListener("click", async () => {
-        if (!api()) return;
         const key = tog.dataset.boolKey;
-        const cur = Boolean(latestState && latestState.cfg && latestState.cfg[key]);
-        applyState(await api().set_setting(key, !cur));
+        const next = !tog.classList.contains("on");
+        tog.classList.toggle("on", next);
+        await mutate((a) => a.set_setting(key, next));
         flashSaved();
       });
     });
     $("set-apply-audio-mode").addEventListener("click", async () => {
-      if (!api()) return;
-      applyState(await api().set_setting("audio_mode", $("set-audio-mode").value));
+      await mutate((a) => a.set_setting("audio_mode", $("set-audio-mode").value));
       flashSaved();
     });
     $("set-audio-mode").addEventListener("change", async (e) => {
-      if (!api()) return;
-      applyState(await api().set_setting("audio_mode", e.target.value));
+      await mutate((a) => a.set_setting("audio_mode", e.target.value));
       flashSaved();
     });
     $("set-apply-fade-mode").addEventListener("click", async () => {
-      if (!api()) return;
-      applyState(await api().set_setting("fade_in_mode", $("set-fade-mode").value));
+      await mutate((a) => a.set_setting("fade_in_mode", $("set-fade-mode").value));
       flashSaved();
     });
     $("set-fade-mode").addEventListener("change", async (e) => {
-      if (!api()) return;
-      applyState(await api().set_setting("fade_in_mode", e.target.value));
+      await mutate((a) => a.set_setting("fade_in_mode", e.target.value));
       flashSaved();
     });
 
@@ -812,13 +880,12 @@
           await navigator.clipboard.writeText(inp.value);
         } catch (_) {}
       }
-      if (api()) await api().copy_obs_url();
+      await mutate((a) => a.copy_obs_url());
       $("obs-copy-btn").textContent = "Copied";
       setTimeout(() => ($("obs-copy-btn").textContent = "Copy URL"), 1400);
     });
     $("obs-toggle-btn").addEventListener("click", async () => {
-      if (!api()) return;
-      applyState(await api().toggle_obs_overlay());
+      await mutate((a) => a.toggle_obs_overlay());
       flashSaved();
     });
     $("obs-preview-btn").addEventListener("click", () => {
@@ -842,48 +909,52 @@
       resetArmed = false;
       clearTimeout(resetTimer);
       btn.textContent = "Reset all settings to defaults";
-      if (!api()) return;
-      applyState(await api().reset_defaults());
+      await mutate((a) => a.reset_defaults());
       flashSaved();
     });
 
-    // Global hotkey capture listener + block accidental F5 reload inside WebView2
-    window.addEventListener("keydown", async (e) => {
-      if (recordingTarget) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (e.key === "Escape") {
-          stopRecording(true);
-          return;
-        }
-        const spec = jsKeyEventToSpec(e);
-        if (!spec) return;
-        const target = recordingTarget;
-        stopRecording(false);
-        if (api()) {
+    // Global hotkey capture listener (capture phase so focused buttons or F5 never interfere)
+    window.addEventListener(
+      "keydown",
+      async (e) => {
+        if (recordingTarget) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.key === "Escape") {
+            stopRecording(true);
+            return;
+          }
+          const spec = jsKeyEventToSpec(e);
+          if (!spec) return;
+          const target = recordingTarget;
+          stopRecording(false);
           if (target === "watch") {
-            applyState(await api().set_watch_hotkey(spec));
+            await mutate((a) => a.set_watch_hotkey(spec));
           } else {
-            applyState(await api().set_deafen_hotkey(spec));
+            await mutate((a) => a.set_deafen_hotkey(spec));
           }
           flashSaved();
+          return;
         }
-        return;
-      }
-      if (e.key === "F5" || (e.ctrlKey && (e.key === "r" || e.key === "R"))) {
-        e.preventDefault();
-      }
-    });
+        if (e.key === "F5" || (e.ctrlKey && (e.key === "r" || e.key === "R"))) {
+          e.preventDefault();
+        }
+      },
+      true
+    );
   }
 
   async function pollLoop() {
     try {
-      if (api()) {
+      if (api() && activeMutations === 0) {
+        const epochAtStart = mutationEpoch;
         const st = await api().get_state();
-        applyState(st);
+        if (activeMutations === 0 && epochAtStart === mutationEpoch) {
+          applyState(st);
+        }
       }
     } catch (_) {}
-    pollTimer = setTimeout(pollLoop, 180);
+    pollTimer = setTimeout(pollLoop, 220);
   }
 
   window.addEventListener("pywebviewready", async () => {

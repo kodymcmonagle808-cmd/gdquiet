@@ -512,7 +512,8 @@ class GDQuietWebApp:
         self._save_cfg()
 
         if key == "audio_mode":
-            self.audio_ctrl.restore()
+            if self.audio_ctrl.has_active_effect:
+                self.audio_ctrl.restore()
             with self._apply_cond:
                 self._force_reapply = True
                 self._apply_cond.notify_all()
@@ -639,7 +640,8 @@ class GDQuietWebApp:
         self._save_cfg()
 
         if unchecked:
-            self.audio_ctrl.restore_process(target)
+            if self.audio_ctrl.has_active_effect:
+                self.audio_ctrl.restore_process(target)
         elif self.current_want_mute or self._current_fade_volume is not None:
             with self._apply_cond:
                 self._force_reapply = True
@@ -650,7 +652,8 @@ class GDQuietWebApp:
         with self.cfg_lock:
             self.cfg["selected_apps"] = []
         self._save_cfg()
-        self.audio_ctrl.restore()
+        if self.audio_ctrl.has_active_effect:
+            self.audio_ctrl.restore()
         return self.get_state()
 
     # ---- Capture & Region ----
