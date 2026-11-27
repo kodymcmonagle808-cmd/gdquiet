@@ -3199,9 +3199,8 @@ class GDQuietApp:
 
     def _confirm_level_detection_candidate(self) -> None:
         level_name = self._pending_level_display
-        key = profile_key(self._pending_level_raw)
         self._save_level_detection_feedback(level_name)
-        self._activate_level_profile(level_name, key)
+        self._activate_level_profile(level_name, profile_key(level_name))
 
     def _edit_level_detection_candidate(self) -> None:
         self.level_correction_entry.delete(0, "end")
@@ -3212,9 +3211,8 @@ class GDQuietApp:
     def _save_level_detection_correction(self) -> None:
         corrected = self.level_correction_entry.get().strip()
         if corrected:
-            key = profile_key(self._pending_level_raw)
             self._save_level_detection_feedback(corrected)
-            self._activate_level_profile(corrected, key)
+            self._activate_level_profile(corrected, profile_key(corrected))
         else:
             self.level_detection_prompt_label.configure(text="Enter the correct level name, or choose Later.")
 

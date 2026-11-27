@@ -304,6 +304,9 @@ def normalize_level_name(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", (name or "").casefold())
 
 
+_LEVEL_MENU_LABELS_NORMALIZED = frozenset(normalize_level_name(label) for label in _LEVEL_MENU_LABELS)
+
+
 def extract_level_name_from_pause_text(text: str) -> str | None:
     lines = [re.sub(r"\s+", " ", line).strip(" \t|:•-") for line in (text or "").splitlines()]
     if not any(_PAUSE_MENU_MARKER_RE.search(line) for line in lines):
@@ -316,7 +319,7 @@ def extract_level_name_from_pause_text(text: str) -> str | None:
             len(candidate) > 48
             or len(normalized) < 3
             or "%" in candidate
-            or normalized in {normalize_level_name(label) for label in _LEVEL_MENU_LABELS}
+            or normalized in _LEVEL_MENU_LABELS_NORMALIZED
             or re.search(r"\b(?:attempts?|normal mode|practice|resume|restart)\b", candidate, re.IGNORECASE)
         ):
             continue
@@ -680,7 +683,10 @@ class ScreenPercentWatcher:
         if rect is None:
             return None
         x, y, width, height = rect
-        shot = sct.grab({"left": x, "top": y, "width": width, "height": height})
+        # Capture only the top ~40% of the window where the pause menu title appears,
+        # reducing OCR noise from gameplay elements and improving scan speed.
+        scan_height = max(80, int(height * 0.40))
+        shot = sct.grab({"left": x, "top": y, "width": width, "height": scan_height})
         img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
         text = ocr.recognize_text(img.convert("RGBA"))
         return extract_level_name_from_pause_text(text)
