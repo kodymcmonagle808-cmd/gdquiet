@@ -443,7 +443,9 @@ class GDQuietWebApp:
 
     def _get_preview_data_url(self, reading: ScreenReading | None) -> str | None:
         if reading is None or reading.preview_image is None:
-            return None
+            # Return the last cached preview so the frontend keeps showing it
+            # between preview_interval ticks instead of flickering.
+            return self._cached_preview_url
         rid = id(reading)
         if self._cached_preview_reading_id == rid and self._cached_preview_url is not None:
             return self._cached_preview_url
@@ -525,6 +527,8 @@ class GDQuietWebApp:
                 "preview_data_url": self._get_preview_data_url(reading),
             }
         else:
+            self._cached_preview_url = None
+            self._cached_preview_reading_id = None
             reading_dict = {
                 "percent": None,
                 "raw_text": "",

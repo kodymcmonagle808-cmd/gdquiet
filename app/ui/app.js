@@ -583,7 +583,9 @@
       prevImg.classList.add("show");
       prevPh.classList.add("hide");
       regionBox.classList.add("hide");
-    } else {
+    } else if (!watchingOn || !prevImg.dataset.lastSrc) {
+      // Only show placeholder when watcher is off or no preview was ever received.
+      // Keep the last preview visible between preview_interval updates to avoid flicker.
       prevImg.classList.remove("show");
       prevPh.classList.remove("hide");
       regionBox.classList.remove("hide");
