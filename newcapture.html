@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GD Quiet — Screen capture</title>
+<meta name="color-scheme" content="dark" />
+<style>
+  :root{
+    --bg:#0e0e11;--panel:#131317;--card:#1a1a1f;--card2:#191920;--plot:#14141a;
+    --line:rgba(255,255,255,.075);--line2:rgba(255,255,255,.12);
+    --ink:#f2f2f4;--muted:#a1a1aa;--faint:#6f6f7a;
+    --accent:#5a52c9;--accent-soft:rgba(90,82,201,.2);
+    --green:#22c55e;--amber:#facc15;--red:#ef4444;
+    --mono:"Cascadia Mono",Consolas,ui-monospace,SFMono-Regular,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:13.5px/1.5 "Segoe UI",system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+  input,select{font:inherit;color:inherit}
+  .app{display:grid;grid-template-columns:248px minmax(0,1fr);min-height:calc(100vh - 32px)}
+  .titlebar{position:sticky;top:0;z-index:30;display:flex;align-items:center;justify-content:space-between;height:32px;padding-left:11px;background:#0b0b0d;border-bottom:1px solid var(--line);user-select:none}
+  .tb-name{display:flex;align-items:center;gap:8px;font-size:11.5px;color:#7c7c85}
+  .tb-name b{font-weight:600;color:#c2c2c9}
+  .tb-mark{width:12px;height:12px;border-radius:3px;background:var(--accent)}
+  .tb-controls{display:flex;height:100%}
+  .tb-controls span{width:44px;display:grid;place-items:center;font-size:10px;color:#8a8a92;line-height:1}
+  .tb-controls span:hover{background:rgba(255,255,255,.07);color:#e6e6ea}
+  .tb-controls span.close:hover{background:#c42b1c;color:#fff}
+
+  /* ---------- sidebar ---------- */
+  .sidebar{position:sticky;top:32px;height:calc(100vh - 32px);display:flex;flex-direction:column;gap:16px;padding:16px 10px 12px;background:var(--panel);border-right:1px solid var(--line)}
+  .brand{display:flex;align-items:center;gap:9px;padding:2px 8px 4px}
+  .logo{width:26px;height:26px;border-radius:5px;background:var(--accent);display:grid;place-items:center;flex:none}
+  .name{font-size:14.5px;font-weight:600;letter-spacing:-.01em;line-height:1.15}
+  .sub{font-size:9px;font-weight:600;letter-spacing:.16em;color:var(--faint)}
+  .navlabel{font-size:9px;font-weight:600;letter-spacing:.18em;color:#5b5b66;padding-left:10px}
+  nav{display:flex;flex-direction:column;gap:2px;margin-top:-10px}
+  nav a{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;font-size:13px;color:var(--muted);transition:background .15s,color .15s}
+  nav a:hover{background:rgba(255,255,255,.045);color:var(--ink)}
+  nav a.on{background:var(--accent-soft);color:#cfc9ff}
+  nav a svg{width:15px;height:15px;flex:none;opacity:.85}
+  .badge{margin-left:auto;font-size:11px;font-variant-numeric:tabular-nums;background:rgba(255,255,255,.08);border-radius:5px;padding:1px 6px;color:var(--muted)}
+  .watcher{margin-top:auto;background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:13px}
+  .watcher-head{display:flex;align-items:center;gap:7px;font-size:9px;font-weight:600;letter-spacing:.15em;color:var(--amber)}
+  .dot{width:6px;height:6px;border-radius:50%;background:currentColor;box-shadow:0 0 8px currentColor;flex:none}
+  .watcher-pct{font-size:21px;font-weight:600;letter-spacing:-.02em;margin-top:9px;font-variant-numeric:tabular-nums}
+  .watcher-sub{font-size:11px;color:var(--faint)}
+  .watcher-thresh{font-size:10.5px;color:var(--faint);text-align:center;margin-top:8px}
+  .sidebar-foot{display:flex;flex-direction:column;gap:9px}
+  .ver{display:flex;justify-content:space-between;align-items:center;font-size:10.5px;color:#5b5b66;padding:2px 4px 0}
+  .ver a{display:inline-flex;align-items:center;gap:4px;color:var(--faint)}
+  .ver a:hover{color:var(--muted)}
+
+  /* ---------- controls ---------- */
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:31px;padding:0 12px;border-radius:5px;font-size:12px;font-weight:500;border:1px solid transparent;white-space:nowrap;transition:background .15s,border-color .15s,color .15s}
+  .btn.primary{background:var(--accent);color:#fff}
+  .btn.primary:hover{background:#6a61d8}
+  .btn.ghost{background:rgba(255,255,255,.04);border-color:var(--line);color:#d4d4d8}
+  .btn.ghost:hover{background:rgba(255,255,255,.07)}
+  .btn.block{width:100%}
+  kbd{font-family:inherit;font-size:10px;font-weight:600;padding:2px 5px;border-radius:4px;background:rgba(255,255,255,.16);letter-spacing:.04em}
+  .link{font-size:11.5px;color:var(--faint);text-align:center}
+  .link:hover{color:var(--muted)}
+  .toggle{width:36px;height:20px;border-radius:99px;background:rgba(255,255,255,.14);position:relative;transition:background .2s;flex:none;padding:0}
+  .toggle::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .2s}
+  .toggle.on{background:var(--accent)}
+  .toggle.on::after{transform:translateX(16px)}
+  input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:18px;background:transparent;cursor:pointer}
+  input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:99px;background:linear-gradient(to right,var(--accent) var(--fill,59%),rgba(255,255,255,.12) var(--fill,59%))}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:#fff;margin-top:-4.5px;box-shadow:0 0 0 3px rgba(109,94,245,.35)}
+  input[type=range]::-moz-range-track{height:4px;border-radius:99px;background:rgba(255,255,255,.12)}
+  input[type=range]::-moz-range-progress{height:4px;border-radius:99px;background:var(--accent)}
+  input[type=range]::-moz-range-thumb{width:13px;height:13px;border:0;border-radius:50%;background:#fff}
+
+  /* ---------- main ---------- */
+  main{padding:26px 34px 60px;max-width:1240px}
+  .topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+  .crumb{font-size:10px;letter-spacing:.05em;color:#5f5f68;font-weight:500}
+  h1{font-size:23px;font-weight:600;letter-spacing:-.02em;margin:8px 0 5px}
+  .lead{color:var(--muted);font-size:13.5px;margin:0}
+  .saved{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:#4ade80;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.22);padding:5px 10px;border-radius:7px;white-space:nowrap}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:15px 16px}
+  .card h2{font-size:13px;font-weight:600;margin:0;letter-spacing:0}
+  .eyebrow{font-size:10px;letter-spacing:.04em;color:#7b7b84;font-weight:600}
+  .muted{color:var(--muted);font-size:12.5px;margin:6px 0 0;line-height:1.6}
+
+  .cols{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:16px;margin-top:22px;align-items:start}
+  .stack{display:flex;flex-direction:column;gap:16px}
+
+  /* ---------- target window ---------- */
+  .target{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px}
+  .select{position:relative;flex:1 1 220px;min-width:180px}
+  .select select{width:100%;height:36px;appearance:none;padding:0 34px 0 12px;border-radius:8px;background:#131318;border:1px solid var(--line);font-family:var(--mono);font-size:12px}
+  .select select:focus{outline:none;border-color:rgba(109,94,245,.55)}
+  .select svg{position:absolute;right:11px;top:50%;transform:translateY(-50%);width:12px;height:12px;color:#5f5f6a;pointer-events:none}
+  .paused{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--amber);margin-top:12px}
+  .paused span{color:#5f5f6a;font-size:11px}
+
+  /* ---------- preview ---------- */
+  .preview{position:relative;margin-top:14px;border-radius:10px;background:#101014;border:1px solid var(--line);aspect-ratio:16/9;overflow:hidden;display:grid;place-items:center}
+  .preview::before{content:"";position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);background-size:34px 34px}
+  .region{position:absolute;left:24%;right:24%;top:8%;height:15%;border:1.5px dashed rgba(109,94,245,.85);border-radius:4px;background:rgba(109,94,245,.07)}
+  .region span{position:absolute;top:-19px;left:0;font-size:8.5px;letter-spacing:.12em;color:#a99fff;font-weight:600}
+  .pause{position:relative;z-index:2;text-align:center;padding:0 20px}
+  .glyph{width:40px;height:40px;border-radius:50%;border:1px solid var(--line2);background:#151519;display:grid;place-items:center;margin:0 auto 12px}
+  .glyph svg{width:15px;height:15px;color:var(--muted)}
+  .pause b{display:block;font-size:13px;font-weight:600}
+  .pause p{font-size:11.5px;color:var(--faint);margin:3px 0 0}
+  .pbar{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-top:14px;padding-top:13px;border-top:1px solid var(--line);font-size:11px;color:#5f5f6a}
+  .pbar .grp{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .pbar .lbl{font-size:9px;letter-spacing:.12em;font-weight:600;color:#5b5b66}
+  .pbar b{font-size:14px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
+  .ocr{font-family:var(--mono);font-size:10.5px;color:#5f5f6a}
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:10.5px;padding:3px 8px;border-radius:6px;color:var(--amber);background:rgba(250,204,21,.1);border:1px solid rgba(250,204,21,.25)}
+  .pill .dot{width:5px;height:5px;box-shadow:none}
+
+  /* ---------- position ---------- */
+  .opts{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
+  .opt{height:36px;border-radius:8px;border:1px solid var(--line);background:#16161b;font-size:12px;color:var(--muted);transition:.15s}
+  .opt:hover{border-color:var(--line2);color:var(--ink)}
+  .opt.on{border-color:rgba(109,94,245,.6);background:var(--accent-soft);color:#cfc9ff}
+  .subhead{font-size:9px;letter-spacing:.14em;color:#5b5b66;font-weight:600;margin:18px 0 8px}
+  .custom{display:flex;flex-direction:column;gap:8px}
+  .current{margin-top:14px;padding-top:13px;border-top:1px solid var(--line);font-size:11.5px;color:var(--faint);line-height:1.6}
+  .current b{display:block;font-size:9px;letter-spacing:.14em;color:#5b5b66;font-weight:600;margin-bottom:4px}
+  .current strong{color:var(--ink);font-weight:500}
+
+  .tip{margin-top:18px;background:#16161b;border:1px solid var(--line);border-radius:10px;padding:13px 15px;font-size:11.5px;color:var(--muted);line-height:1.6}
+  .tip b{color:var(--ink);font-weight:600;display:block;margin-bottom:3px;font-size:12px}
+
+  @media (max-width:1080px){
+    .app{grid-template-columns:1fr}
+    .sidebar{position:static;height:auto}
+    main{padding:22px 20px 48px}
+    .cols{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+<div class="titlebar">
+  <div class="tb-name"><span class="tb-mark"></span><b>GD Quiet</b> <span>Screen Muter</span></div>
+  <div class="tb-controls"><span>&#8212;</span><span>&#9633;</span><span class="close">&#10005;</span></div>
+</div>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="logo">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3.2L12 18.5v-13L7.2 9.5H4z"/><path d="M16.5 9l4 6M20.5 9l-4 6"/></svg>
+      </span>
+      <span>
+        <span class="name">GD Quiet</span><br />
+        <span class="sub">SCREEN MUTER</span>
+      </span>
+    </div>
+
+    <div class="navlabel">WORKSPACE</div>
+    <nav>
+      <a href="gd-quiet-overview.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg>Overview</a>
+      <a href="gd-quiet-apps.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3.2L12 18.5v-13L7.2 9.5H4z"/><path d="M16.5 9l4 6M20.5 9l-4 6"/></svg>Apps to mute<span class="badge">4</span></a>
+      <a href="gd-quiet-deafen.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 14.5v-2.5a8 8 0 0 1 16 0v2.5"/><rect x="2.4" y="13.6" width="4" height="6.2" rx="2"/><rect x="17.6" y="13.6" width="4" height="6.2" rx="2"/></svg>Discord auto-deafen</a>
+      <a class="on" href="gd-quiet-capture.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="2.6" y="4" width="18.8" height="12.6" rx="2"/><path d="M9 20.6h6M12 16.6v4"/></svg>Screen capture</a>
+      <a href="gd-quiet-settings.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.6v3M12 18.4v3M2.6 12h3M18.4 12h3M5.4 5.4l2.1 2.1M16.5 16.5l2.1 2.1M18.6 5.4l-2.1 2.1M7.5 16.5l-2.1 2.1"/></svg>Settings</a>
+    </nav>
+
+    <div class="watcher">
+      <div class="watcher-head"><span class="dot"></span>WATCHER PAUSED</div>
+      <div class="watcher-pct">-- %</div>
+      <div class="watcher-sub">Waiting for a run</div>
+      <input type="range" min="0" max="100" value="59" style="--fill:59%;margin-top:10px" aria-label="Mute threshold" />
+      <div class="watcher-thresh">Mute threshold</div>
+    </div>
+
+    <div class="sidebar-foot">
+      <button class="btn primary block">Resume watching <kbd>F6</kbd></button>
+      <a class="link" href="#">Unmute &amp; undeafen all</a>
+      <div class="ver">
+        <span>v4.0.0</span>
+        <a href="#">Check for updates
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M7 17 17 7M9 7h8v8"/></svg>
+        </a>
+      </div>
+    </div>
+  </aside>
+
+  <main>
+    <div class="topbar">
+      <div>
+        <div class="crumb">GD QUIET / SCREEN CAPTURE</div>
+        <h1>Screen capture</h1>
+        <p class="lead">Choose a game window and the area to read.</p>
+      </div>
+      <span class="saved"><span class="dot"></span>Settings saved</span>
+    </div>
+
+    <div class="cols">
+      <div class="stack">
+        <section class="card">
+          <h2>Target window</h2>
+          <p class="muted">Choose the Geometry Dash window to watch.</p>
+          <div class="target">
+            <div class="select">
+              <select aria-label="Target window">
+                <option>geometrydash.exe</option>
+                <option>Geometry Dash (windowed)</option>
+                <option>Geometry Dash (borderless)</option>
+              </select>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+            </div>
+            <button class="btn ghost">Refresh windows</button>
+          </div>
+          <div class="paused"><span class="dot"></span>Screen watcher paused <span>· No screen data is being read.</span></div>
+        </section>
+
+        <section class="card">
+          <h2>Capture preview</h2>
+          <p class="muted">What GD Quiet sees</p>
+
+          <div class="preview">
+            <div class="region"><span>AUTO · TOP 10%</span></div>
+            <div class="pause">
+              <div class="glyph">
+                <svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="5.5" width="3.6" height="13" rx="1.2"/><rect x="13.4" y="5.5" width="3.6" height="13" rx="1.2"/></svg>
+              </div>
+              <b>Capture is paused</b>
+              <p>Resume watching to see live screen data.</p>
+            </div>
+          </div>
+
+          <div class="pbar">
+            <div class="grp">
+              <span class="lbl">DETECTED</span>
+              <b>-- %</b>
+            </div>
+            <div class="grp"><span>Screen watcher paused</span></div>
+            <div class="grp"><span class="ocr">Raw OCR: (empty)</span></div>
+            <span class="pill"><span class="dot"></span>Paused</span>
+          </div>
+        </section>
+      </div>
+
+      <section class="card">
+        <h2>Percentage position</h2>
+        <p class="muted">Choose where the percentage appears.</p>
+
+        <div class="opts" id="opts">
+          <button class="opt on">Auto top 10%</button>
+          <button class="opt">Top center</button>
+          <button class="opt">Top left</button>
+          <button class="opt">Top right</button>
+          <button class="opt" style="grid-column:1 / -1">Bottom center</button>
+        </div>
+
+        <div class="subhead">CUSTOM REGION</div>
+        <div class="custom">
+          <button class="btn primary">Drag box on screen</button>
+          <button class="btn ghost">Pick with 3s delay</button>
+        </div>
+
+        <div class="current">
+          <b>CURRENT REGION</b>
+          <strong>Auto · Top 10%</strong> — adjust the box if readings are inconsistent.
+        </div>
+      </section>
+    </div>
+
+    <div class="tip">
+      <b>Tips for accurate detection</b>
+      Run Geometry Dash in Borderless or Windowed mode with &ldquo;Show Percentage&rdquo; enabled for the best accuracy.
+    </div>
+  </main>
+</div>
+
+<script>
+  document.querySelectorAll('.toggle').forEach(function (t) {
+    t.addEventListener('click', function () { t.classList.toggle('on'); });
+  });
+  document.querySelectorAll('#opts .opt').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.querySelectorAll('#opts .opt').forEach(function (o) { o.classList.remove('on'); });
+      b.classList.add('on');
+      document.querySelector('.region span').textContent = b.textContent.toUpperCase();
+    });
+  });
+</script>
+</body>
+</html>
