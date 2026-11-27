@@ -7,6 +7,7 @@ Standalone Windows app (`GDQuiet.exe`) that reads your level percentage directly
 - **No Geode Mod Needed:** Reads the percentage text directly from the top 10% of `GeometryDash.exe` (or drag your own box with **Pick Screen Region**).
 - **Per-Window Audio Controls:** Pick exactly which open windows or audio apps are affected past your chosen threshold, leaving manually muted apps untouched.
 - **Mute or Duck Audio:** Mute selected apps or lower their volume to a configurable level, restoring their previous volume when the trigger ends.
+- **Fade Before Threshold:** Optionally lower selected-app volume gradually before the threshold, with slow and fast fade ranges.
 - **Discord Auto-Deafen:** Record your Discord **Toggle Deafen** hotkey so Discord automatically deafens above your threshold and undeafens on death, exit, or 100%.
 - **Global % Checks Toggle Keybind:** Bind a global Windows keybind on **Overview** to pause or resume `%` watching and audio muting anytime, even while Geometry Dash is focused.
 - **OBS Studio Overlay:** Add a local Browser Source to show live progress, mute state, and threshold, with controls to pause watching or adjust the threshold.
@@ -28,7 +29,8 @@ Standalone Windows app (`GDQuiet.exe`) that reads your level percentage directly
    - *(Optional)* Enable **Auto-Deafen Discord** and follow the built-in setup tutorial.
    - *(Optional)* In **Settings → OBS Studio Overlay**, enable the local server and add the shown URL as a 560 × 300 OBS **Browser Source**. Right-click the source and choose **Interact** to use its controls. The overlay is served only from this computer.
    - *(Optional)* In **Settings → Audio Action**, choose **Mute** or **Duck**, then set the ducked volume. The app restores only volume changes it made.
+   - *(Optional)* Set **Fade Audio Before Threshold** to **Slow** or **Fast** to lower selected-app volume before the threshold; the configured audio action takes over at the threshold.
    - *(Optional)* Confirm a detected level to create or load its local profile. Adjust threshold, selected apps, and capture region as usual, then choose **Save Current Settings** on Overview.
    - *(Optional)* Use the **Screen Capture** page's OCR diagnostics to inspect recognized text and consecutive missed reads.
    - *(Optional)* Use the system tray menu to pause/resume, toggle mute, open the window, or exit. Enable **Close to System Tray** in Settings if you want the close button to hide the window instead of exiting.
-   - *(Beta only)* After opting in to beta updates and installing `v4.0.0-beta.2`, use **Settings → Experimental Features (Beta)** to turn on level detection. It is off by default and only scans while screen watching is active; confirm or correct each detected title in GD Quiet. Feedback and profiles are saved locally.
+   - *(Beta only)* After opting in to beta updates and installing `v4.0.0-beta.3`, use **Settings → Experimental Features (Beta)** to turn on level detection. It is off by default and only scans while screen watching is active; confirm or correct each detected title in GD Quiet. Feedback and profiles are saved locally.

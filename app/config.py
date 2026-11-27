@@ -45,6 +45,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "level_profiles": {},
     "audio_mode": "mute",
     "ducking_volume": 20.0,
+    "fade_in_mode": "off",
     "close_to_tray": False,
     "obs_overlay_enabled": False,
     "test_duration_s": 30.0,

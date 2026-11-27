@@ -136,6 +136,87 @@ class GDQuietTests(unittest.TestCase):
             self.assertEqual(manually_muted.SimpleAudioVolume.muted, 1)
             self.assertFalse(ctrl.is_ducking)
 
+    def test_audio_fade_ramp_restores_before_threshold_mute(self) -> None:
+        spotify = FakeSession("spotify.exe", 111, volume=0.8)
+        ctrl = window_audio.AudioMuteController()
+        with patch.object(window_audio.AudioUtilities, "GetAllSessions", return_value=[spotify]):
+            for target in (70.0, 40.0, 10.0):
+                ctrl.apply(["spotify.exe"], mute=True, duck_to=target)
+            self.assertEqual(spotify.SimpleAudioVolume.volume, 0.1)
+
+            ctrl.apply(["spotify.exe"], mute=True)
+            self.assertEqual(spotify.SimpleAudioVolume.volume, 0.8)
+            self.assertEqual(spotify.SimpleAudioVolume.muted, 1)
+
+            ctrl.restore()
+            self.assertEqual(spotify.SimpleAudioVolume.volume, 0.8)
+            self.assertEqual(spotify.SimpleAudioVolume.muted, 0)
+
+    def test_fade_in_volume_respects_speed_threshold_and_action_volume(self) -> None:
+        import gdquiet
+
+        fade = gdquiet.fade_volume_for_percent
+        self.assertIsNone(fade(30.0, 50.0, "slow"))
+        self.assertIsNone(fade(35.0, 50.0, "slow"))
+        self.assertEqual(fade(42.5, 50.0, "slow"), 50.0)
+        self.assertEqual(fade(50.0, 50.0, "slow"), None)
+        self.assertIsNone(fade(44.0, 50.0, "fast"))
+        self.assertEqual(fade(47.5, 50.0, "fast"), 50.0)
+        self.assertEqual(fade(47.5, 50.0, "fast", end_volume=20.0), 60.0)
+        self.assertIsNone(fade(None, 50.0, "slow"))
+
+    def test_screen_reading_fades_before_threshold_then_applies_mute(self) -> None:
+        import threading
+        import gdquiet
+
+        app = gdquiet.GDQuietApp.__new__(gdquiet.GDQuietApp)
+        app._closing = False
+        app.cfg_lock = threading.RLock()
+        app.cfg = {
+            "watch_enabled": True,
+            "remute_interval_s": 0.4,
+            "sound_feedback": False,
+            "fade_in_mode": "slow",
+            "mute_at_percent": 50.0,
+            "audio_mode": "mute",
+            "ducking_volume": 20.0,
+        }
+        app._tray_audio_override = None
+        app.test_lock = threading.Lock()
+        app.test_session = SimpleNamespace(active=False)
+        app.current_want_mute = False
+        app._current_fade_volume = None
+        app._last_audio_enforce_at = 0.0
+        app.apply_requests: list[tuple[bool, float | None]] = []
+        app._apply_mute_state = lambda muted, **kwargs: app.apply_requests.append(
+            (muted, kwargs.get("fade_volume"))
+        )
+        app.reading_lock = threading.Lock()
+        app._ui_reading_pending = False
+        app.root = SimpleNamespace(after=lambda *_args: None)
+
+        app._on_screen_reading(
+            screen_reader.ScreenReading(
+                percent=42.5,
+                raw_text="42.5%",
+                should_mute=False,
+                is_playing=True,
+                status_text="Watching",
+                preview_image=None,
+            )
+        )
+        app._on_screen_reading(
+            screen_reader.ScreenReading(
+                percent=50.0,
+                raw_text="50%",
+                should_mute=True,
+                is_playing=True,
+                status_text="Watching",
+                preview_image=None,
+            )
+        )
+        self.assertEqual(app.apply_requests, [(False, 50.0), (True, None)])
+
     def test_audio_mode_switch_restores_volume_before_muting(self) -> None:
         spotify = FakeSession("spotify.exe", 111, volume=0.7)
         ctrl = window_audio.AudioMuteController()
@@ -1161,6 +1242,7 @@ class GDQuietTests(unittest.TestCase):
         app = gdquiet.GDQuietApp.__new__(gdquiet.GDQuietApp)
         app._apply_cond = threading.Condition()
         app._pending_mute = False
+        app._pending_fade_volume = None
         app._force_reapply = True
         app._apply_stop = False
         app.apply_lock = threading.Lock()

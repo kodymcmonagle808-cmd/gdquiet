@@ -226,6 +226,25 @@ def format_ocr_diagnostics(reading: ScreenReading) -> tuple[str, str]:
     )
 
 
+def fade_volume_for_percent(
+    percent: float | None,
+    threshold: float,
+    mode: str,
+    end_volume: float = 0.0,
+) -> float | None:
+    if percent is None or mode not in {"slow", "fast"} or threshold <= 0 or percent >= threshold:
+        return None
+
+    fade_width = 15.0 if mode == "slow" else 5.0
+    fade_start = max(0.0, threshold - fade_width)
+    if percent <= fade_start:
+        return None
+
+    progress = min(1.0, (percent - fade_start) / (threshold - fade_start))
+    end = max(0.0, min(100.0, end_volume))
+    return 100.0 - progress * (100.0 - end)
+
+
 class GDQuietApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -251,6 +270,7 @@ class GDQuietApp:
         self.apply_lock = threading.Lock()
         self._apply_cond = threading.Condition()
         self._pending_mute: bool | None = None
+        self._pending_fade_volume: float | None = None
         self._force_reapply = False
         self._apply_stop = False
         self._apply_thread = threading.Thread(target=self._apply_worker, daemon=True)
@@ -260,6 +280,7 @@ class GDQuietApp:
         self.test_session = ScreenTestSession(duration_s=float(self.cfg.get("test_duration_s", 30.0)))
 
         self.current_want_mute = False
+        self._current_fade_volume: float | None = None
         self.recording_hotkey = False
         self._hk_capture_state: tuple[tk.Button, str, str, Callable[[], None] | None] | None = None
         self.global_hotkey = GlobalHotkeyWatcher(on_trigger=self._on_global_watch_toggle)
@@ -1854,6 +1875,36 @@ class GDQuietApp:
         )
         audio_mode_combo.pack(side="right")
         audio_mode_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_audio_mode_changed())
+        fade_row = tk.Frame(c1, bg=COLORS["card"])
+        fade_row.pack(fill="x", pady=4)
+        tk.Label(
+            fade_row,
+            text="Fade Audio Before Threshold",
+            bg=COLORS["card"],
+            fg=COLORS["text"],
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side="left")
+        self.fade_in_mode_var = tk.StringVar(value=str(self.cfg.get("fade_in_mode", "off")))
+        fade_mode_combo = ttk.Combobox(
+            fade_row,
+            textvariable=self.fade_in_mode_var,
+            values=("off", "slow", "fast"),
+            state="readonly",
+            width=10,
+            style="Dark.TCombobox",
+        )
+        fade_mode_combo.pack(side="right")
+        fade_mode_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_fade_in_mode_changed())
+        tk.Label(
+            c1,
+            text="Slow fades across 15%; Fast fades across 5%. At the threshold, the selected audio action applies.",
+            bg=COLORS["card"],
+            fg=COLORS["subtext"],
+            font=("Segoe UI", 8),
+            anchor="w",
+            wraplength=500,
+            justify="left",
+        ).pack(anchor="w", pady=(0, 4))
         tk.Label(
             c1,
             text="Duck lowers selected apps; optional Discord auto-deafen remains separate.",
@@ -2512,6 +2563,15 @@ class GDQuietApp:
         self._update_sidebar_badges()
         self._apply_mute_state(self.current_want_mute, force_reapply=True)
 
+    def _on_fade_in_mode_changed(self) -> None:
+        mode = self.fade_in_mode_var.get()
+        if mode not in {"off", "slow", "fast"}:
+            mode = "off"
+            self.fade_in_mode_var.set(mode)
+        with self.cfg_lock:
+            self.cfg["fade_in_mode"] = mode
+        self._save_cfg()
+
     def _on_ducking_volume_applied(self, _volume: float) -> None:
         self._apply_mute_state(self.current_want_mute, force_reapply=True)
 
@@ -2946,13 +3006,34 @@ class GDQuietApp:
             if self._tray_audio_override is not None
             else bool(not testing and watch_enabled and reading.should_mute)
         )
+        with self.cfg_lock:
+            fade_mode = str(self.cfg.get("fade_in_mode", "off"))
+            threshold = float(self.cfg.get("mute_at_percent", 50.0))
+            audio_mode = str(self.cfg.get("audio_mode", "mute"))
+            ducking_volume = float(self.cfg.get("ducking_volume", 20.0))
+        fade_volume = None
+        if self._tray_audio_override is None and not testing and watch_enabled and not effective_mute:
+            fade_volume = fade_volume_for_percent(
+                reading.percent,
+                threshold,
+                fade_mode,
+                ducking_volume if audio_mode == "duck" else 0.0,
+            )
         now_m = time.monotonic()
-        if effective_mute != self.current_want_mute:
-            self.current_want_mute = effective_mute
+        mute_changed = effective_mute != self.current_want_mute
+        fade_changed = fade_volume != self._current_fade_volume
+        fade_due = fade_changed and (
+            fade_volume is None
+            or self._current_fade_volume is None
+            or now_m - self._last_audio_enforce_at >= 0.15
+        )
+        if mute_changed or fade_due:
             if effective_mute:
                 self._last_audio_enforce_at = now_m
-            self._apply_mute_state(effective_mute)
-            if sound_feedback:
+            elif fade_due:
+                self._last_audio_enforce_at = now_m
+            self._apply_mute_state(effective_mute, fade_volume=fade_volume)
+            if mute_changed and sound_feedback:
                 try:
                     ctypes.windll.user32.MessageBeep(0x00000040 if effective_mute else 0x0)
                 except Exception:
@@ -3284,25 +3365,34 @@ class GDQuietApp:
 
     def _apply_worker(self) -> None:
         last_applied: bool | None = None
+        last_fade_volume: float | None = None
         while True:
             with self._apply_cond:
                 while not self._apply_stop and (
                     self._pending_mute is None
-                    or (self._pending_mute == last_applied and not self._force_reapply)
+                    or (
+                        self._pending_mute == last_applied
+                        and self._pending_fade_volume == last_fade_volume
+                        and not self._force_reapply
+                    )
                 ):
                     self._apply_cond.wait(timeout=0.5)
                     if (
                         not self._apply_stop
                         and self._pending_mute is None
                         and last_applied is False
+                        and last_fade_volume is None
                         and self.audio_ctrl.has_active_effect
                     ):
                         self._pending_mute = False
+                        self._pending_fade_volume = None
                         self._force_reapply = True
                 if self._apply_stop:
                     return
                 target_mute = bool(self._pending_mute)
+                target_fade_volume = self._pending_fade_volume
                 self._pending_mute = None
+                self._pending_fade_volume = None
                 self._force_reapply = False
 
             with self.apply_lock:
@@ -3314,8 +3404,12 @@ class GDQuietApp:
                     ducking_volume = float(self.cfg.get("ducking_volume", 20.0))
                 self.audio_ctrl.apply(
                     selected,
-                    target_mute,
-                    duck_to=ducking_volume if audio_mode == "duck" else None,
+                    target_mute or target_fade_volume is not None,
+                    duck_to=(
+                        target_fade_volume
+                        if target_fade_volume is not None
+                        else ducking_volume if audio_mode == "duck" else None
+                    ),
                 )
                 self.discord_ctrl.set_deafened(
                     want_deaf=target_mute,
@@ -3323,15 +3417,23 @@ class GDQuietApp:
                     enabled=auto_deafen,
                 )
                 last_applied = target_mute
+                last_fade_volume = target_fade_volume
             try:
                 self.root.after(0, self._update_status_indicators)
             except Exception:
                 pass
 
-    def _apply_mute_state(self, want_mute: bool, force_reapply: bool = False) -> None:
+    def _apply_mute_state(
+        self,
+        want_mute: bool,
+        force_reapply: bool = False,
+        fade_volume: float | None = None,
+    ) -> None:
         with self._apply_cond:
             self.current_want_mute = want_mute
+            self._current_fade_volume = fade_volume
             self._pending_mute = want_mute
+            self._pending_fade_volume = fade_volume
             if force_reapply:
                 self._force_reapply = True
             self._apply_cond.notify_all()
