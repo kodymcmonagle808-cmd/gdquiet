@@ -62,26 +62,33 @@ PERCENT_PRESETS: tuple[tuple[str, float, float, float, float], ...] = (
 
 
 COLORS = {
-    "bg": "#090d16",
-    "sidebar": "#0e1422",
-    "card": "#141c2e",
-    "card_alt": "#1b263d",
-    "hover": "#24324f",
-    "border": "#253352",
-    "input": "#0b101b",
-    "text": "#f8fafc",
-    "subtext": "#94a3b8",
-    "accent": "#6366f1",
-    "accent_hover": "#4f46e5",
+    "bg": "#0e0e11",
+    "sidebar": "#131317",
+    "card": "#1a1a1f",
+    "card2": "#191920",
+    "card_alt": "#16161b",
+    "plot": "#14141a",
+    "hover": "#24242d",
+    "border": "#25252d",
+    "border2": "#31313b",
+    "input": "#131318",
+    "text": "#f2f2f4",
+    "subtext": "#a1a1aa",
+    "faint": "#6f6f7a",
+    "accent": "#5a52c9",
+    "accent_hover": "#6a61d8",
+    "accent_soft": "#252344",
+    "accent_text": "#cfc9ff",
     "cyan": "#38bdf8",
     "cyan_dark": "#0284c7",
     "green": "#22c55e",
-    "green_bg": "#14532d",
+    "green_text": "#4ade80",
+    "green_bg": "#15291e",
     "red": "#ef4444",
-    "red_bg": "#7f1d1d",
-    "amber": "#f59e0b",
-    "amber_bg": "#78350f",
-    "pill_idle": "#334155",
+    "red_bg": "#2c1518",
+    "amber": "#facc15",
+    "amber_bg": "#2b2410",
+    "pill_idle": "#24242c",
 }
 
 
@@ -249,8 +256,8 @@ class GDQuietApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("GD Quiet")
-        self.root.geometry("980x680")
-        self.root.minsize(880, 610)
+        self.root.geometry("1120x740")
+        self.root.minsize(920, 640)
         self.root.configure(bg=COLORS["bg"])
         self._window_icon_photo: ImageTk.PhotoImage | None = None
         self._sidebar_logo_photo: ImageTk.PhotoImage | None = None
@@ -423,15 +430,79 @@ class GDQuietApp:
         )
         return btn
 
-    def _make_card(self, parent: tk.Widget, padx: int = 18, pady: int = 15) -> tk.Frame:
+    def _make_card(self, parent: tk.Widget, padx: int = 16, pady: int = 15, bg: str | None = None) -> tk.Frame:
         return tk.Frame(
             parent,
-            bg=COLORS["card"],
+            bg=bg or COLORS["card"],
             highlightthickness=1,
             highlightbackground=COLORS["border"],
             padx=padx,
             pady=pady,
         )
+
+    def _make_page_header(
+        self,
+        parent: tk.Widget,
+        crumb: str,
+        title: str,
+        subtitle: str,
+    ) -> tuple[tk.Frame, tk.Label, tk.Label]:
+        hdr = tk.Frame(parent, bg=COLORS["bg"])
+        hdr.pack(fill="x", pady=(0, 18))
+
+        left = tk.Frame(hdr, bg=COLORS["bg"])
+        left.pack(side="left", fill="x", expand=True)
+
+        tk.Label(
+            left,
+            text=crumb,
+            bg=COLORS["bg"],
+            fg="#5f5f68",
+            font=("Segoe UI", 8, "bold"),
+            anchor="w",
+        ).pack(anchor="w")
+
+        title_lbl = tk.Label(
+            left,
+            text=title,
+            bg=COLORS["bg"],
+            fg=COLORS["text"],
+            font=("Segoe UI", 19, "bold"),
+            anchor="w",
+        )
+        title_lbl.pack(anchor="w", pady=(3, 2))
+
+        desc_lbl = tk.Label(
+            left,
+            text=subtitle,
+            bg=COLORS["bg"],
+            fg=COLORS["subtext"],
+            font=("Segoe UI", 10),
+            anchor="w",
+        )
+        desc_lbl.pack(anchor="w")
+
+        saved_pill = tk.Frame(
+            hdr,
+            bg=COLORS["green_bg"],
+            highlightthickness=1,
+            highlightbackground="#1e462d",
+            padx=10,
+            pady=5,
+        )
+        saved_pill.pack(side="right", anchor="n", pady=(4, 0))
+        dot_cv = tk.Canvas(saved_pill, width=8, height=8, bg=COLORS["green_bg"], highlightthickness=0)
+        dot_cv.pack(side="left", padx=(0, 6))
+        dot_cv.create_oval(1, 1, 7, 7, fill=COLORS["green_text"], outline="")
+        tk.Label(
+            saved_pill,
+            text="Settings saved",
+            bg=COLORS["green_bg"],
+            fg=COLORS["green_text"],
+            font=("Segoe UI", 8, "bold"),
+        ).pack(side="left")
+
+        return hdr, title_lbl, desc_lbl
 
     def _apply_window_icons(self) -> None:
         ico_path = _resource_path("assets/gdquiet.ico")
@@ -472,99 +543,43 @@ class GDQuietApp:
         shell.pack(fill="both", expand=True)
 
         # Left Sidebar
-        sidebar = tk.Frame(shell, bg=COLORS["sidebar"], width=242, padx=14, pady=16)
+        sidebar = tk.Frame(shell, bg=COLORS["sidebar"], width=248, padx=12, pady=16)
         sidebar.pack(side="left", fill="y")
         sidebar.pack_propagate(False)
 
         brand = tk.Frame(sidebar, bg=COLORS["sidebar"])
-        brand.pack(fill="x", pady=(0, 16))
+        brand.pack(fill="x", padx=4, pady=(0, 16))
         logo_cv = tk.Canvas(brand, width=42, height=42, bg=COLORS["sidebar"], highlightthickness=0)
         logo_cv.pack(side="left", padx=(0, 10))
         self._draw_logo(logo_cv)
 
         brand_txt = tk.Frame(brand, bg=COLORS["sidebar"])
         brand_txt.pack(side="left", fill="x")
-        tk.Label(brand_txt, text="GD Quiet", bg=COLORS["sidebar"], fg=COLORS["text"], font=("Segoe UI", 15, "bold")).pack(
+        tk.Label(brand_txt, text="GD Quiet", bg=COLORS["sidebar"], fg=COLORS["text"], font=("Segoe UI", 13, "bold")).pack(
             anchor="w"
         )
         tk.Label(
             brand_txt,
-            text=f"v{APP_VERSION} • Screen muter",
+            text="SCREEN MUTER",
             bg=COLORS["sidebar"],
-            fg=COLORS["subtext"],
-            font=("Segoe UI", 8),
+            fg=COLORS["faint"],
+            font=("Segoe UI", 8, "bold"),
         ).pack(anchor="w")
 
-        # Live Sidebar Status Card
-        status_box = tk.Frame(
-            sidebar,
-            bg=COLORS["card"],
-            highlightthickness=1,
-            highlightbackground=COLORS["border"],
-            padx=12,
-            pady=12,
-        )
-        status_box.pack(fill="x", pady=(0, 16))
-
-        st_row = tk.Frame(status_box, bg=COLORS["card"])
-        st_row.pack(fill="x")
-        self.status_dot = tk.Canvas(st_row, width=10, height=10, bg=COLORS["card"], highlightthickness=0)
-        self.status_dot.pack(side="left", padx=(0, 6))
-        self._dot_id = self.status_dot.create_oval(1, 1, 9, 9, fill=COLORS["green"], outline="")
-
-        self.sidebar_status_lbl = tk.Label(
-            st_row,
-            text="WATCHING",
-            bg=COLORS["card"],
-            fg=COLORS["green"],
-            font=("Segoe UI", 9, "bold"),
-        )
-        self.sidebar_status_lbl.pack(side="left")
-
-        self.sidebar_pct_lbl = tk.Label(
-            status_box,
-            text="--%",
-            bg=COLORS["card"],
-            fg=COLORS["text"],
-            font=("Consolas", 22, "bold"),
-        )
-        self.sidebar_pct_lbl.pack(anchor="w", pady=(4, 4))
-
-        self.sidebar_pct_bar = tk.Canvas(
-            status_box,
-            height=6,
-            bg=COLORS["input"],
-            highlightthickness=0,
-        )
-        self.sidebar_pct_bar.pack(fill="x", pady=(0, 6))
-
-        self.sidebar_thresh_lbl = tk.Label(
-            status_box,
-            text=(
-                f"{'Ducks at' if self.cfg.get('audio_mode') == 'duck' else 'Mutes past'} "
-                f"{float(self.cfg.get('mute_at_percent', 50.0)):.0f}%"
-            ),
-            bg=COLORS["card"],
-            fg=COLORS["subtext"],
-            font=("Segoe UI", 8),
-        )
-        self.sidebar_thresh_lbl.pack(anchor="w")
-
-        self.sidebar_deaf_lbl = tk.Label(
-            status_box,
-            text="Audio & Discord: Clear",
-            bg=COLORS["card"],
-            fg=COLORS["subtext"],
-            font=("Segoe UI", 8),
-        )
-        self.sidebar_deaf_lbl.pack(anchor="w", pady=(2, 0))
-
         # Navigation Tabs
+        tk.Label(
+            sidebar,
+            text="WORKSPACE",
+            bg=COLORS["sidebar"],
+            fg="#5b5b66",
+            font=("Segoe UI", 8, "bold"),
+        ).pack(anchor="w", padx=8, pady=(0, 6))
+
         nav_wrap = tk.Frame(sidebar, bg=COLORS["sidebar"])
         nav_wrap.pack(fill="x", expand=True, anchor="n")
 
         nav_items = [
-            ("dashboard", "Overview & 30s Test"),
+            ("dashboard", "Overview"),
             ("apps", f"Apps to {'Duck' if self.cfg.get('audio_mode') == 'duck' else 'Mute'}"),
             ("discord", "Discord Auto-Deafen"),
             ("capture", "Screen Capture"),
@@ -572,31 +587,31 @@ class GDQuietApp:
         ]
         for key, label in nav_items:
             row = tk.Frame(nav_wrap, bg=COLORS["sidebar"])
-            row.pack(fill="x", pady=3)
-            indicator = tk.Frame(row, bg=COLORS["sidebar"], width=4)
-            indicator.pack(side="left", fill="y", padx=(0, 4))
+            row.pack(fill="x", pady=2)
+            indicator = tk.Frame(row, bg=COLORS["sidebar"], width=3)
+            indicator.pack(side="left", fill="y", padx=(0, 2))
             btn = tk.Button(
                 row,
                 text=label,
                 command=lambda k=key: self._show_page(k),
                 bg=COLORS["sidebar"],
                 fg=COLORS["subtext"],
-                activebackground=COLORS["card"],
-                activeforeground=COLORS["text"],
+                activebackground=COLORS["accent_soft"],
+                activeforeground=COLORS["accent_text"],
                 relief="flat",
                 bd=0,
                 anchor="w",
                 cursor="hand2",
                 font=("Segoe UI", 10, "bold"),
                 padx=10,
-                pady=9,
+                pady=8,
             )
             btn.pack(side="left", fill="x", expand=True)
             btn.bind(
                 "<Enter>",
                 lambda _e, k=key, r=row, b=btn: (
-                    r.configure(bg=COLORS["card_alt"]),
-                    b.configure(bg=COLORS["card_alt"], fg=COLORS["text"]),
+                    r.configure(bg=COLORS["hover"]),
+                    b.configure(bg=COLORS["hover"], fg=COLORS["text"]),
                 )
                 if self._active_page != k
                 else None,
@@ -612,35 +627,115 @@ class GDQuietApp:
             )
             self._nav_buttons[key] = (row, indicator, btn)
 
+        # Live Sidebar Watcher Card
+        status_box = tk.Frame(
+            sidebar,
+            bg=COLORS["card2"],
+            highlightthickness=1,
+            highlightbackground=COLORS["border"],
+            padx=13,
+            pady=12,
+        )
+        status_box.pack(fill="x", pady=(10, 12))
+
+        st_row = tk.Frame(status_box, bg=COLORS["card2"])
+        st_row.pack(fill="x")
+        self.status_dot = tk.Canvas(st_row, width=10, height=10, bg=COLORS["card2"], highlightthickness=0)
+        self.status_dot.pack(side="left", padx=(0, 6))
+        self._dot_id = self.status_dot.create_oval(1, 1, 9, 9, fill=COLORS["green"], outline="")
+
+        self.sidebar_status_lbl = tk.Label(
+            st_row,
+            text="WATCHING",
+            bg=COLORS["card2"],
+            fg=COLORS["green"],
+            font=("Segoe UI", 8, "bold"),
+        )
+        self.sidebar_status_lbl.pack(side="left")
+
+        self.sidebar_pct_lbl = tk.Label(
+            status_box,
+            text="-- %",
+            bg=COLORS["card2"],
+            fg=COLORS["text"],
+            font=("Segoe UI", 19, "bold"),
+        )
+        self.sidebar_pct_lbl.pack(anchor="w", pady=(6, 2))
+
+        self.sidebar_deaf_lbl = tk.Label(
+            status_box,
+            text="Audio & Discord: Clear",
+            bg=COLORS["card2"],
+            fg=COLORS["faint"],
+            font=("Segoe UI", 8),
+        )
+        self.sidebar_deaf_lbl.pack(anchor="w", pady=(0, 8))
+
+        self.sidebar_pct_bar = tk.Canvas(
+            status_box,
+            height=5,
+            bg=COLORS["hover"],
+            highlightthickness=0,
+        )
+        self.sidebar_pct_bar.pack(fill="x", pady=(0, 6))
+
+        self.sidebar_thresh_lbl = tk.Label(
+            status_box,
+            text=(
+                f"{'Ducks at' if self.cfg.get('audio_mode') == 'duck' else 'Mutes past'} "
+                f"{float(self.cfg.get('mute_at_percent', 50.0)):.0f}%"
+            ),
+            bg=COLORS["card2"],
+            fg=COLORS["faint"],
+            font=("Segoe UI", 8),
+        )
+        self.sidebar_thresh_lbl.pack(anchor="center")
+
         # Sidebar bottom controls
         self.watch_toggle_btn = self._make_button(
             sidebar,
             "Pause Watching" if self.cfg.get("watch_enabled", True) else "Resume Watching",
             self._toggle_watching,
-            bg=COLORS["card_alt"],
-            pady=8,
+            bg=COLORS["accent"],
+            hover_bg=COLORS["accent_hover"],
+            pady=7,
         )
-        self.watch_toggle_btn.pack(fill="x", pady=(8, 4))
+        self.watch_toggle_btn.pack(fill="x", pady=(0, 6))
 
         self.reset_mute_btn = self._make_button(
             sidebar,
             "Restore Audio & Undeafen" if self.cfg.get("audio_mode") == "duck" else "Unmute & Undeafen All",
             self._force_restore_all,
             bg=COLORS["card_alt"],
-            pady=6,
+            fg=COLORS["subtext"],
+            pady=5,
             font=("Segoe UI", 8, "bold"),
         )
-        self.reset_mute_btn.pack(fill="x", pady=(0, 4))
+        self.reset_mute_btn.pack(fill="x", pady=(0, 8))
+
+        ver_row = tk.Frame(sidebar, bg=COLORS["sidebar"])
+        ver_row.pack(fill="x", pady=(0, 2))
+        tk.Label(
+            ver_row,
+            text=f"v{APP_VERSION}",
+            bg=COLORS["sidebar"],
+            fg="#5b5b66",
+            font=("Segoe UI", 8),
+        ).pack(side="left", padx=(2, 0))
 
         self.update_btn = self._make_button(
-            sidebar,
+            ver_row,
             "Check for Updates",
             self._on_update_button_click,
-            bg=COLORS["card_alt"],
-            pady=6,
-            font=("Segoe UI", 8, "bold"),
+            bg=COLORS["sidebar"],
+            fg=COLORS["faint"],
+            hover_bg=COLORS["hover"],
+            padx=6,
+            pady=2,
+            font=("Segoe UI", 8),
         )
-        self.update_btn.pack(fill="x", pady=(0, 2))
+        self.update_btn.configure(highlightthickness=0)
+        self.update_btn.pack(side="right")
 
         self.footer_error = tk.Label(
             sidebar,
@@ -648,7 +743,7 @@ class GDQuietApp:
             bg=COLORS["sidebar"],
             fg=COLORS["subtext"],
             font=("Segoe UI", 8),
-            wraplength=200,
+            wraplength=220,
             justify="left",
         )
         self.footer_error.pack(anchor="w", pady=(2, 0))
@@ -657,7 +752,7 @@ class GDQuietApp:
         tk.Frame(shell, bg=COLORS["border"], width=1).pack(side="left", fill="y")
 
         # Right Main Content Area
-        self.main_area = tk.Frame(shell, bg=COLORS["bg"], padx=22, pady=18)
+        self.main_area = tk.Frame(shell, bg=COLORS["bg"], padx=28, pady=22)
         self.main_area.pack(side="left", fill="both", expand=True)
 
         # Prominent top Update Banner slot (packed/shown dynamically when a newer release exists)
@@ -795,9 +890,9 @@ class GDQuietApp:
 
         for k, (row, ind, btn) in self._nav_buttons.items():
             if k == page_key:
-                row.configure(bg=COLORS["card"])
-                ind.configure(bg=COLORS["cyan"])
-                btn.configure(bg=COLORS["card"], fg=COLORS["text"])
+                row.configure(bg=COLORS["accent_soft"])
+                ind.configure(bg=COLORS["accent"])
+                btn.configure(bg=COLORS["accent_soft"], fg=COLORS["accent_text"])
             else:
                 row.configure(bg=COLORS["sidebar"])
                 ind.configure(bg=COLORS["sidebar"])
@@ -807,87 +902,83 @@ class GDQuietApp:
         page = tk.Frame(self.main_area, bg=COLORS["bg"])
         self._pages["dashboard"] = page
 
-        tk.Label(page, text="Overview", bg=COLORS["bg"], fg=COLORS["text"], font=("Segoe UI", 17, "bold")).pack(
-            anchor="w"
+        self._make_page_header(
+            page,
+            "GD QUIET / OVERVIEW",
+            "Overview",
+            "Set your mute threshold and test percentage detection.",
         )
+
+        # Two-column top layout
+        cols = tk.Frame(page, bg=COLORS["bg"])
+        cols.pack(fill="x", pady=(0, 14))
+        cols.columnconfigure(0, weight=16)
+        cols.columnconfigure(1, weight=10)
+
+        # Left Card: Mute Threshold & Hotkey
+        trig_card = self._make_card(cols)
+        trig_card.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
+
         tk.Label(
-            page,
-            text="Control when selected-app audio changes and run a 30-second screen-reading test.",
-            bg=COLORS["bg"],
-            fg=COLORS["subtext"],
-            font=("Segoe UI", 9),
-        ).pack(anchor="w", pady=(2, 14))
-        self.level_detection_status_lbl = tk.Label(
-            page,
-            text=(
-                "Level detection beta is on; waiting for a visible pause-screen title."
-                if self.cfg.get("level_detection_beta", False)
-                else "Level detection beta is off."
-            ),
-            bg=COLORS["bg"],
-            fg=COLORS["amber"] if self.cfg.get("level_detection_beta", False) else COLORS["subtext"],
-            font=("Segoe UI", 8),
-            anchor="w",
-        )
-        self.level_detection_status_lbl.pack(anchor="w", pady=(0, 8))
-
-        profile_box = tk.Frame(page, bg=COLORS["card"], padx=10, pady=8)
-        profile_box.pack(fill="x", pady=(0, 12))
-        self.active_level_profile_lbl = tk.Label(
-            profile_box,
-            text="No confirmed level profile active",
+            trig_card,
+            text="MUTE THRESHOLD",
             bg=COLORS["card"],
-            fg=COLORS["subtext"],
-            font=("Segoe UI", 9),
-            anchor="w",
-        )
-        self.active_level_profile_lbl.pack(side="left", fill="x", expand=True)
-        self.save_level_profile_btn = self._make_button(
-            profile_box,
-            "Save Current Settings",
-            self._save_active_level_profile,
-            bg=COLORS["card_alt"],
-            padx=10,
-            pady=5,
+            fg="#7b7b84",
             font=("Segoe UI", 8, "bold"),
-        )
-        self.save_level_profile_btn.pack(side="right")
+        ).pack(anchor="w")
 
-        # Card 1: Threshold + quick summary
-        trig_card = self._make_card(page)
-        trig_card.pack(fill="x", pady=(0, 14))
-
-        t_top = tk.Frame(trig_card, bg=COLORS["card"])
-        t_top.pack(fill="x")
         self.trigger_heading_lbl = tk.Label(
-            t_top,
+            trig_card,
             text="Audio Action at Threshold",
             bg=COLORS["card"],
             fg=COLORS["text"],
             font=("Segoe UI", 11, "bold"),
         )
-        self.trigger_heading_lbl.pack(side="left")
-
-        self.unmute_100_var = tk.BooleanVar(value=bool(self.cfg.get("unmute_at_100", True)))
-        tk.Checkbutton(
-            t_top,
-            text="Unmute at 100% (level complete)",
-            variable=self.unmute_100_var,
-            command=self._on_toggle_unmute_100,
+        self.trigger_heading_lbl.pack(anchor="w", pady=(3, 2))
+        tk.Label(
+            trig_card,
+            text="Mute selected apps when your progress passes the threshold.",
             bg=COLORS["card"],
             fg=COLORS["subtext"],
-            selectcolor=COLORS["input"],
-            activebackground=COLORS["card"],
-            activeforeground=COLORS["text"],
             font=("Segoe UI", 9),
-        ).pack(side="right")
+        ).pack(anchor="w", pady=(0, 10))
 
-        pct_row = tk.Frame(trig_card, bg=COLORS["card"])
-        pct_row.pack(fill="x", pady=(10, 12))
+        pct_display_row = tk.Frame(trig_card, bg=COLORS["card"])
+        pct_display_row.pack(fill="x", pady=(0, 6))
 
         self.percent_var = tk.DoubleVar(value=float(self.cfg.get("mute_at_percent", 50.0)))
+        self.percent_entry_var = tk.StringVar(value=f"{self.percent_var.get():.0f}")
+
+        tk.Entry(
+            pct_display_row,
+            textvariable=self.percent_entry_var,
+            width=4,
+            bg=COLORS["card"],
+            fg=COLORS["text"],
+            insertbackground=COLORS["text"],
+            relief="flat",
+            font=("Segoe UI", 28, "bold"),
+            justify="left",
+        ).pack(side="left")
+        tk.Label(
+            pct_display_row,
+            text="%",
+            bg=COLORS["card"],
+            fg=COLORS["subtext"],
+            font=("Segoe UI", 15, "bold"),
+        ).pack(side="left", anchor="s", pady=(0, 8), padx=(0, 16))
+
+        self.save_pct_btn = self._make_button(
+            pct_display_row,
+            "Apply %",
+            self._save_mute_percent,
+            bg=COLORS["accent"],
+            hover_bg=COLORS["accent_hover"],
+        )
+        self.save_pct_btn.pack(side="right", anchor="center")
+
         self.percent_scale = tk.Scale(
-            pct_row,
+            trig_card,
             from_=0,
             to=100,
             resolution=1,
@@ -896,136 +987,219 @@ class GDQuietApp:
             showvalue=False,
             bg=COLORS["card"],
             fg=COLORS["text"],
-            troughcolor=COLORS["input"],
-            activebackground=COLORS["cyan"],
+            troughcolor=COLORS["hover"],
+            activebackground=COLORS["accent"],
             highlightthickness=0,
-            length=340,
             command=self._on_scale_move,
         )
-        self.percent_scale.pack(side="left", padx=(0, 12))
+        self.percent_scale.pack(fill="x")
 
-        self.percent_entry_var = tk.StringVar(value=f"{self.percent_var.get():.0f}")
-        tk.Entry(
-            pct_row,
-            textvariable=self.percent_entry_var,
-            width=5,
-            bg=COLORS["input"],
-            fg=COLORS["text"],
-            insertbackground=COLORS["text"],
-            relief="flat",
-            font=("Consolas", 13, "bold"),
-            justify="center",
-        ).pack(side="left", padx=(0, 4), ipady=4)
-        tk.Label(pct_row, text="%", bg=COLORS["card"], fg=COLORS["subtext"], font=("Segoe UI", 12, "bold")).pack(
-            side="left", padx=(0, 12)
-        )
-        self.save_pct_btn = self._make_button(
-            pct_row,
-            "Apply %",
-            self._save_mute_percent,
-            bg=COLORS["accent"],
-            hover_bg=COLORS["accent_hover"],
-        )
-        self.save_pct_btn.pack(side="left")
+        scale_labels = tk.Frame(trig_card, bg=COLORS["card"])
+        scale_labels.pack(fill="x", pady=(2, 10))
+        tk.Label(scale_labels, text="0%", bg=COLORS["card"], fg="#5b5b66", font=("Segoe UI", 8)).pack(side="left")
+        tk.Label(scale_labels, text="100%", bg=COLORS["card"], fg="#5b5b66", font=("Segoe UI", 8)).pack(side="right")
 
-        # Global Hotkey to Toggle % Checks On/Off
-        watch_hk_row = tk.Frame(trig_card, bg=COLORS["card"])
-        watch_hk_row.pack(fill="x", pady=(0, 12))
+        tk.Frame(trig_card, bg=COLORS["border"], height=1).pack(fill="x", pady=(2, 10))
 
+        u100_row = tk.Frame(trig_card, bg=COLORS["card"])
+        u100_row.pack(fill="x", pady=(0, 10))
+        u100_txt = tk.Frame(u100_row, bg=COLORS["card"])
+        u100_txt.pack(side="left", fill="x", expand=True)
         tk.Label(
-            watch_hk_row,
-            text="Toggle % Checks Hotkey:",
+            u100_txt,
+            text="Restore audio at 100%",
             bg=COLORS["card"],
-            fg=COLORS["subtext"],
+            fg=COLORS["text"],
             font=("Segoe UI", 9, "bold"),
-        ).pack(side="left", padx=(0, 8))
+        ).pack(anchor="w")
+        tk.Label(
+            u100_txt,
+            text="Bring everything back when a level is completed",
+            bg=COLORS["card"],
+            fg=COLORS["faint"],
+            font=("Segoe UI", 8),
+        ).pack(anchor="w")
+
+        self.unmute_100_var = tk.BooleanVar(value=bool(self.cfg.get("unmute_at_100", True)))
+        tk.Checkbutton(
+            u100_row,
+            variable=self.unmute_100_var,
+            command=self._on_toggle_unmute_100,
+            bg=COLORS["card"],
+            fg=COLORS["text"],
+            selectcolor=COLORS["input"],
+            activebackground=COLORS["card"],
+            activeforeground=COLORS["text"],
+        ).pack(side="right")
+
+        watch_hk_box = tk.Frame(
+            trig_card,
+            bg=COLORS["card_alt"],
+            highlightthickness=1,
+            highlightbackground=COLORS["border"],
+            padx=12,
+            pady=10,
+        )
+        watch_hk_box.pack(fill="x")
+
+        hk_top = tk.Frame(watch_hk_box, bg=COLORS["card_alt"])
+        hk_top.pack(fill="x", pady=(0, 8))
+        tk.Label(
+            hk_top,
+            text="Toggle checks",
+            bg=COLORS["card_alt"],
+            fg=COLORS["text"],
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side="left")
 
         watch_hk = self.cfg.get("watch_toggle_hotkey")
         watch_hk_text = watch_hk.get("label", "Not set") if isinstance(watch_hk, dict) else "Not set"
         self.watch_hk_var = tk.StringVar(value=watch_hk_text)
         tk.Label(
-            watch_hk_row,
+            hk_top,
             textvariable=self.watch_hk_var,
-            bg=COLORS["input"],
+            bg=COLORS["hover"],
             fg=COLORS["text"],
-            font=("Consolas", 9, "bold"),
-            padx=10,
-            pady=4,
-            width=18,
-            anchor="w",
-        ).pack(side="left", padx=(0, 8))
-
-        self.record_watch_hk_btn = self._make_button(
-            watch_hk_row,
-            "Record Hotkey",
-            self._start_watch_hotkey_record,
-            bg=COLORS["card_alt"],
-            padx=10,
-            pady=4,
-            font=("Segoe UI", 8, "bold"),
-        )
-        self.record_watch_hk_btn.pack(side="left", padx=(0, 6))
-        self._make_button(
-            watch_hk_row,
-            "Clear",
-            self._clear_watch_hotkey,
+            font=("Consolas", 8, "bold"),
             padx=8,
-            pady=4,
-            font=("Segoe UI", 8),
-        ).pack(side="left", padx=(0, 10))
+            pady=2,
+        ).pack(side="right")
 
         self.watch_hk_status_lbl = tk.Label(
-            watch_hk_row,
+            hk_top,
             text="Inactive",
-            bg=COLORS["card"],
+            bg=COLORS["card_alt"],
             fg=COLORS["subtext"],
+            font=("Segoe UI", 8),
+        )
+        self.watch_hk_status_lbl.pack(side="right", padx=(0, 8))
+
+        hk_btns = tk.Frame(watch_hk_box, bg=COLORS["card_alt"])
+        hk_btns.pack(fill="x")
+        self.record_watch_hk_btn = self._make_button(
+            hk_btns,
+            "Record Hotkey",
+            self._start_watch_hotkey_record,
+            bg=COLORS["accent"],
+            hover_bg=COLORS["accent_hover"],
+            padx=10,
+            pady=4,
             font=("Segoe UI", 8, "bold"),
         )
-        self.watch_hk_status_lbl.pack(side="left")
+        self.record_watch_hk_btn.pack(side="left", padx=(0, 8))
+        self._make_button(
+            hk_btns,
+            "Clear",
+            self._clear_watch_hotkey,
+            bg=COLORS["card"],
+            padx=10,
+            pady=4,
+            font=("Segoe UI", 8),
+        ).pack(side="left")
 
-        # Summary Chips Row
-        chips = tk.Frame(trig_card, bg=COLORS["card"])
-        chips.pack(fill="x")
+        # Right Card: Current Setup & Level Profile
+        setup_card = self._make_card(cols)
+        setup_card.grid(row=0, column=1, sticky="nsew")
+
+        tk.Label(
+            setup_card,
+            text="CURRENT SETUP",
+            bg=COLORS["card"],
+            fg="#7b7b84",
+            font=("Segoe UI", 8, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            setup_card,
+            text="Current setup",
+            bg=COLORS["card"],
+            fg=COLORS["text"],
+            font=("Segoe UI", 11, "bold"),
+        ).pack(anchor="w", pady=(3, 8))
 
         self.summary_apps_btn = self._make_button(
-            chips,
+            setup_card,
             "Apps: 0 selected",
             lambda: self._show_page("apps"),
+            bg=COLORS["card_alt"],
             padx=12,
-            pady=5,
-            font=("Segoe UI", 8, "bold"),
+            pady=6,
+            font=("Segoe UI", 9, "bold"),
         )
-        self.summary_apps_btn.pack(side="left", padx=(0, 8))
+        self.summary_apps_btn.configure(anchor="w")
+        self.summary_apps_btn.pack(fill="x", pady=(0, 6))
 
         self.summary_discord_btn = self._make_button(
-            chips,
+            setup_card,
             "Discord Deafen: Off",
             lambda: self._show_page("discord"),
+            bg=COLORS["card_alt"],
             padx=12,
-            pady=5,
-            font=("Segoe UI", 8, "bold"),
+            pady=6,
+            font=("Segoe UI", 9, "bold"),
         )
-        self.summary_discord_btn.pack(side="left", padx=(0, 8))
+        self.summary_discord_btn.configure(anchor="w")
+        self.summary_discord_btn.pack(fill="x", pady=(0, 6))
 
         self.summary_capture_btn = self._make_button(
-            chips,
+            setup_card,
             "Capture: Auto (GeometryDash.exe)",
             lambda: self._show_page("capture"),
+            bg=COLORS["card_alt"],
             padx=12,
-            pady=5,
-            font=("Segoe UI", 8, "bold"),
+            pady=6,
+            font=("Segoe UI", 9, "bold"),
         )
-        self.summary_capture_btn.pack(side="left", padx=(0, 8))
+        self.summary_capture_btn.configure(anchor="w")
+        self.summary_capture_btn.pack(fill="x", pady=(0, 6))
 
         self._make_button(
-            chips,
+            setup_card,
             "Pick % Spot",
             self._start_region_pick,
             bg=COLORS["card_alt"],
-            padx=10,
+            padx=12,
             pady=5,
             font=("Segoe UI", 8, "bold"),
-        ).pack(side="left")
+        ).pack(fill="x", pady=(0, 10))
+
+        tk.Frame(setup_card, bg=COLORS["border"], height=1).pack(fill="x", pady=(0, 10))
+
+        self.active_level_profile_lbl = tk.Label(
+            setup_card,
+            text="No confirmed level profile active",
+            bg=COLORS["card"],
+            fg=COLORS["faint"],
+            font=("Segoe UI", 8, "bold"),
+            anchor="w",
+        )
+        self.active_level_profile_lbl.pack(fill="x")
+
+        self.level_detection_status_lbl = tk.Label(
+            setup_card,
+            text=(
+                "Level detection beta is on; waiting for a visible pause-screen title."
+                if self.cfg.get("level_detection_beta", False)
+                else "Level detection beta is off."
+            ),
+            bg=COLORS["card"],
+            fg=COLORS["amber"] if self.cfg.get("level_detection_beta", False) else "#5b5b66",
+            font=("Segoe UI", 8),
+            anchor="w",
+            wraplength=280,
+            justify="left",
+        )
+        self.level_detection_status_lbl.pack(fill="x", pady=(2, 10))
+
+        self.save_level_profile_btn = self._make_button(
+            setup_card,
+            "Save Current Settings",
+            self._save_active_level_profile,
+            bg=COLORS["card_alt"],
+            padx=10,
+            pady=6,
+            font=("Segoe UI", 8, "bold"),
+        )
+        self.save_level_profile_btn.pack(fill="x")
 
         # Card 2: 30-Second Screen Test
         test_card = self._make_card(page)
@@ -1038,14 +1212,14 @@ class GDQuietApp:
         tc_title.pack(side="left", fill="x", expand=True)
         tk.Label(
             tc_title,
-            text="30-Second Screen Test",
+            text="30-second screen test",
             bg=COLORS["card"],
             fg=COLORS["text"],
-            font=("Segoe UI", 12, "bold"),
+            font=("Segoe UI", 11, "bold"),
         ).pack(anchor="w")
         tk.Label(
             tc_title,
-            text="Play any GD level for 30 seconds — we'll show every % detected (selected-app audio stays unchanged during the test).",
+            text="Check percentage detection before your next run. Audio stays unchanged during the test.",
             bg=COLORS["card"],
             fg=COLORS["subtext"],
             font=("Segoe UI", 9),
@@ -1055,83 +1229,104 @@ class GDQuietApp:
             tc_top,
             "Start 30s Test",
             self._toggle_screen_test,
-            bg=COLORS["cyan"],
-            fg="#082f49",
-            hover_bg="#7dd3fc",
-            padx=16,
-            pady=8,
+            bg=COLORS["accent"],
+            fg=COLORS["text"],
+            hover_bg=COLORS["accent_hover"],
+            padx=14,
+            pady=7,
         )
         self.test_btn.pack(side="right", padx=(10, 0))
 
-        # Progress bar + metrics row
-        prog_row = tk.Frame(test_card, bg=COLORS["card"])
-        prog_row.pack(fill="x", pady=(12, 8))
+        # Stats Strip
+        stats_strip = tk.Frame(
+            test_card,
+            bg=COLORS["card_alt"],
+            highlightthickness=1,
+            highlightbackground=COLORS["border"],
+            padx=12,
+            pady=8,
+        )
+        stats_strip.pack(fill="x", pady=(12, 8))
+
+        self.test_timer_lbl = tk.Label(
+            stats_strip,
+            text="Ready (30s)",
+            bg=COLORS["card_alt"],
+            fg=COLORS["text"],
+            font=("Consolas", 9, "bold"),
+        )
+        self.test_timer_lbl.pack(side="left", padx=(0, 18))
+
+        self.test_live_pct_lbl = tk.Label(
+            stats_strip,
+            text="Live Read: --%",
+            bg=COLORS["card_alt"],
+            fg=COLORS["text"],
+            font=("Consolas", 9, "bold"),
+        )
+        self.test_live_pct_lbl.pack(side="left", padx=(0, 18))
+
+        self.test_stats_lbl = tk.Label(
+            stats_strip,
+            text="Peak: --%  •  Reads: 0",
+            bg=COLORS["card_alt"],
+            fg=COLORS["subtext"],
+            font=("Segoe UI", 9),
+        )
+        self.test_stats_lbl.pack(side="left")
+
+        dur_s = int(round(float(self.cfg.get("test_duration_s", 30.0))))
+        tk.Label(
+            stats_strip,
+            text=f"Duration: {dur_s}s",
+            bg=COLORS["card_alt"],
+            fg=COLORS["faint"],
+            font=("Segoe UI", 8),
+        ).pack(side="right")
 
         self.test_bar_canvas = tk.Canvas(
-            prog_row,
-            height=10,
-            bg=COLORS["input"],
+            test_card,
+            height=6,
+            bg=COLORS["plot"],
             highlightthickness=1,
             highlightbackground=COLORS["border"],
         )
-        self.test_bar_canvas.pack(side="left", fill="x", expand=True, padx=(0, 12))
-
-        self.test_timer_lbl = tk.Label(
-            prog_row,
-            text="Ready (30s)",
-            bg=COLORS["card"],
-            fg=COLORS["subtext"],
-            font=("Consolas", 10, "bold"),
-            width=14,
-            anchor="e",
-        )
-        self.test_timer_lbl.pack(side="right")
+        self.test_bar_canvas.pack(fill="x", pady=(0, 10))
 
         # Live Chart + Percentages Seen Feed
         body_row = tk.Frame(test_card, bg=COLORS["card"])
-        body_row.pack(fill="both", expand=True, pady=(4, 8))
+        body_row.pack(fill="both", expand=True, pady=(0, 8))
 
         chart_wrap = tk.Frame(
             body_row,
-            bg=COLORS["input"],
+            bg=COLORS["plot"],
             highlightthickness=1,
             highlightbackground=COLORS["border"],
-            padx=8,
+            padx=10,
             pady=8,
         )
-        chart_wrap.pack(side="left", fill="both", expand=True, padx=(0, 12))
+        chart_wrap.pack(side="left", fill="both", expand=True, padx=(0, 14))
 
-        ch_hdr = tk.Frame(chart_wrap, bg=COLORS["input"])
-        ch_hdr.pack(fill="x", pady=(0, 4))
-        self.test_live_pct_lbl = tk.Label(
-            ch_hdr,
-            text="Live Read: --%",
-            bg=COLORS["input"],
-            fg=COLORS["text"],
-            font=("Consolas", 11, "bold"),
-        )
-        self.test_live_pct_lbl.pack(side="left")
-        self.test_stats_lbl = tk.Label(
-            ch_hdr,
-            text="Peak: --%  •  Reads: 0",
-            bg=COLORS["input"],
-            fg=COLORS["subtext"],
-            font=("Segoe UI", 8),
-        )
-        self.test_stats_lbl.pack(side="right")
+        tk.Label(
+            chart_wrap,
+            text="PROGRESS (%)",
+            bg=COLORS["plot"],
+            fg="#5b5b66",
+            font=("Segoe UI", 8, "bold"),
+        ).pack(anchor="w", pady=(0, 4))
 
-        self.test_chart = tk.Canvas(chart_wrap, bg=COLORS["input"], highlightthickness=0, height=175)
+        self.test_chart = tk.Canvas(chart_wrap, bg=COLORS["plot"], highlightthickness=0, height=175)
         self.test_chart.pack(fill="both", expand=True)
         self.test_chart.bind("<Configure>", lambda _e: self._draw_test_chart())
 
         # Milestones list on the right
         feed_wrap = tk.Frame(
             body_row,
-            bg=COLORS["input"],
+            bg=COLORS["plot"],
             highlightthickness=1,
             highlightbackground=COLORS["border"],
-            width=215,
-            padx=8,
+            width=225,
+            padx=10,
             pady=8,
         )
         feed_wrap.pack(side="right", fill="y")
@@ -1139,17 +1334,17 @@ class GDQuietApp:
 
         tk.Label(
             feed_wrap,
-            text="Percentages Seen",
-            bg=COLORS["input"],
-            fg=COLORS["text"],
-            font=("Segoe UI", 9, "bold"),
-        ).pack(anchor="w", pady=(0, 4))
+            text="PERCENTAGES SEEN",
+            bg=COLORS["plot"],
+            fg="#6b6b76",
+            font=("Segoe UI", 8, "bold"),
+        ).pack(anchor="w", pady=(0, 6))
 
         self.test_listbox = tk.Listbox(
             feed_wrap,
-            bg=COLORS["input"],
-            fg=COLORS["cyan"],
-            selectbackground=COLORS["card_alt"],
+            bg=COLORS["plot"],
+            fg=COLORS["accent_text"],
+            selectbackground=COLORS["hover"],
             relief="flat",
             bd=0,
             highlightthickness=0,
@@ -1160,12 +1355,12 @@ class GDQuietApp:
         # Result Banner
         self.test_verdict_lbl = tk.Label(
             test_card,
-            text="Tip: Start a level in Geometry Dash and press Start 30s Test to check detection.",
+            text='Start a level in Geometry Dash with "Show Percentage" enabled, then select Start 30s Test.',
             bg=COLORS["card_alt"],
-            fg=COLORS["subtext"],
-            font=("Segoe UI", 9),
+            fg=COLORS["faint"],
+            font=("Segoe UI", 8),
             padx=12,
-            pady=8,
+            pady=7,
             anchor="w",
             justify="left",
         )
@@ -1175,44 +1370,78 @@ class GDQuietApp:
         page = tk.Frame(self.main_area, bg=COLORS["bg"])
         self._pages["apps"] = page
 
-        hdr = tk.Frame(page, bg=COLORS["bg"])
-        hdr.pack(fill="x", pady=(0, 12))
-        self.apps_page_heading_lbl = tk.Label(
-            hdr,
-            text="Apps to Mute",
-            bg=COLORS["bg"],
-            fg=COLORS["text"],
-            font=("Segoe UI", 17, "bold"),
+        hdr, self.apps_page_heading_lbl, self.apps_page_desc_lbl = self._make_page_header(
+            page,
+            "GD QUIET / APPS TO MUTE",
+            "Apps to Mute",
+            "Select the apps to mute during a run.",
         )
-        self.apps_page_heading_lbl.pack(anchor="w")
-        self.apps_page_desc_lbl = tk.Label(
-            hdr,
-            text="Select only the windows/apps whose audio should change when passing your %. Geometry Dash is never affected.",
-            bg=COLORS["bg"],
+
+        # Summary card
+        summary = self._make_card(page, padx=16, pady=12)
+        summary.pack(fill="x", pady=(0, 12))
+
+        sum_left = tk.Frame(summary, bg=COLORS["card"])
+        sum_left.pack(side="left", fill="x", expand=True)
+        self.apps_summary_count_lbl = tk.Label(
+            sum_left,
+            text="0 apps selected",
+            bg=COLORS["card"],
+            fg=COLORS["text"],
+            font=("Segoe UI", 14, "bold"),
+        )
+        self.apps_summary_count_lbl.pack(anchor="w")
+        self.apps_summary_sub_lbl = tk.Label(
+            sum_left,
+            text="These apps will mute after 50%. Their audio returns when the run ends.",
+            bg=COLORS["card"],
             fg=COLORS["subtext"],
             font=("Segoe UI", 9),
         )
-        self.apps_page_desc_lbl.pack(anchor="w", pady=(2, 0))
+        self.apps_summary_sub_lbl.pack(anchor="w", pady=(2, 0))
 
-        card = self._make_card(page, padx=14, pady=12)
-        card.pack(fill="both", expand=True)
+        sum_right = tk.Frame(summary, bg=COLORS["card"])
+        sum_right.pack(side="right")
+        self.apps_summary_thresh_lbl = tk.Label(
+            sum_right,
+            text="50%",
+            bg=COLORS["card"],
+            fg=COLORS["text"],
+            font=("Segoe UI", 16, "bold"),
+        )
+        self.apps_summary_thresh_lbl.pack(anchor="e")
+        tk.Label(
+            sum_right,
+            text="MUTE THRESHOLD",
+            bg=COLORS["card"],
+            fg="#5f5f6a",
+            font=("Segoe UI", 8, "bold"),
+        ).pack(anchor="e")
 
-        toolbar = tk.Frame(card, bg=COLORS["card"])
+        # Toolbar
+        toolbar = tk.Frame(page, bg=COLORS["bg"])
         toolbar.pack(fill="x", pady=(0, 10))
 
         self.app_search_var = tk.StringVar()
         self.app_search_var.trace_add("write", lambda *_a: self._render_apps_list())
-        search_box = tk.Entry(
+        search_wrap = tk.Frame(
             toolbar,
+            bg=COLORS["input"],
+            highlightthickness=1,
+            highlightbackground=COLORS["border"],
+            padx=8,
+        )
+        search_wrap.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        search_box = tk.Entry(
+            search_wrap,
             textvariable=self.app_search_var,
             bg=COLORS["input"],
             fg=COLORS["text"],
             insertbackground=COLORS["text"],
             relief="flat",
             font=("Segoe UI", 9),
-            width=26,
         )
-        search_box.pack(side="left", ipady=5, padx=(0, 8))
+        search_box.pack(fill="x", ipady=5)
 
         self.bg_audio_var = tk.BooleanVar(value=bool(self.cfg.get("show_background_audio", False)))
         tk.Checkbutton(
@@ -1220,25 +1449,39 @@ class GDQuietApp:
             text="Show background audio",
             variable=self.bg_audio_var,
             command=self._on_toggle_bg_audio,
-            bg=COLORS["card"],
+            bg=COLORS["bg"],
             fg=COLORS["subtext"],
             selectcolor=COLORS["input"],
-            activebackground=COLORS["card"],
+            activebackground=COLORS["bg"],
             activeforeground=COLORS["text"],
-            font=("Segoe UI", 8),
-        ).pack(side="left", padx=(4, 0))
+            font=("Segoe UI", 9),
+        ).pack(side="left", padx=(0, 10))
 
-        self._make_button(toolbar, "Clear All", self._clear_selected_apps, padx=10, pady=5).pack(side="right")
-        self._make_button(toolbar, "Refresh Windows", self._refresh_windows, padx=10, pady=5).pack(
-            side="right", padx=(0, 8)
+        self._make_button(toolbar, "Refresh Windows", self._refresh_windows, bg=COLORS["card_alt"], padx=10, pady=5).pack(
+            side="left", padx=(0, 8)
+        )
+        self._make_button(toolbar, "Clear All", self._clear_selected_apps, bg=COLORS["card_alt"], padx=10, pady=5).pack(
+            side="left"
         )
 
-        list_wrap = tk.Frame(card, bg=COLORS["input"], highlightthickness=1, highlightbackground=COLORS["border"])
+        # List card
+        list_wrap = tk.Frame(page, bg=COLORS["card_alt"], highlightthickness=1, highlightbackground=COLORS["border"])
         list_wrap.pack(fill="both", expand=True)
 
-        self.win_canvas = tk.Canvas(list_wrap, bg=COLORS["input"], highlightthickness=0)
+        thead = tk.Frame(list_wrap, bg=COLORS["card2"], padx=14, pady=8)
+        thead.pack(fill="x")
+        tk.Label(thead, text="APPLICATION", bg=COLORS["card2"], fg="#5f5f6a", font=("Segoe UI", 8, "bold")).pack(side="left")
+        tk.Label(thead, text="ACTION", bg=COLORS["card2"], fg="#5f5f6a", font=("Segoe UI", 8, "bold"), width=12, anchor="w").pack(
+            side="right"
+        )
+        tk.Label(thead, text="AUDIO STATUS", bg=COLORS["card2"], fg="#5f5f6a", font=("Segoe UI", 8, "bold"), width=16, anchor="w").pack(
+            side="right", padx=(0, 10)
+        )
+        tk.Frame(list_wrap, bg=COLORS["border"], height=1).pack(fill="x")
+
+        self.win_canvas = tk.Canvas(list_wrap, bg=COLORS["card_alt"], highlightthickness=0)
         self.win_scroll = ttk.Scrollbar(list_wrap, orient="vertical", command=self.win_canvas.yview)
-        self.win_list_frame = tk.Frame(self.win_canvas, bg=COLORS["input"])
+        self.win_list_frame = tk.Frame(self.win_canvas, bg=COLORS["card_alt"])
 
         self.win_list_frame.bind(
             "<Configure>",
@@ -1254,64 +1497,80 @@ class GDQuietApp:
         self.win_canvas.pack(side="left", fill="both", expand=True)
         self.win_scroll.pack(side="right", fill="y")
 
+        # Bottom callout
+        never_box = tk.Frame(
+            page,
+            bg=COLORS["card_alt"],
+            highlightthickness=1,
+            highlightbackground=COLORS["border"],
+            padx=14,
+            pady=10,
+        )
+        never_box.pack(fill="x", pady=(12, 0))
+        tk.Frame(never_box, bg=COLORS["accent"], width=3).pack(side="left", fill="y", padx=(0, 12))
+        never_txt = tk.Frame(never_box, bg=COLORS["card_alt"])
+        never_txt.pack(side="left", fill="x", expand=True)
+        tk.Label(
+            never_txt,
+            text="Geometry Dash is never muted",
+            bg=COLORS["card_alt"],
+            fg=COLORS["text"],
+            font=("Segoe UI", 9, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            never_txt,
+            text="GD Quiet only changes audio for your selected apps. Geometry Dash is never muted or controlled.",
+            bg=COLORS["card_alt"],
+            fg=COLORS["subtext"],
+            font=("Segoe UI", 8),
+        ).pack(anchor="w")
+
     def _build_discord_page(self) -> None:
         page = tk.Frame(self.main_area, bg=COLORS["bg"])
         self._pages["discord"] = page
 
-        tk.Label(
+        self._make_page_header(
             page,
-            text="Discord Auto-Deafen",
-            bg=COLORS["bg"],
-            fg=COLORS["text"],
-            font=("Segoe UI", 17, "bold"),
-        ).pack(anchor="w")
-        tk.Label(
-            page,
-            text="Automatically press your Discord Toggle Deafen keybind past your % and undeafen when you die or exit.",
-            bg=COLORS["bg"],
-            fg=COLORS["subtext"],
-            font=("Segoe UI", 9),
-        ).pack(anchor="w", pady=(2, 12))
+            "GD QUIET / DISCORD AUTO-DEAFEN",
+            "Discord Auto-Deafen",
+            "Set up automatic Discord deafen for your runs.",
+        )
+
+        cols = tk.Frame(page, bg=COLORS["bg"])
+        cols.pack(fill="both", expand=True)
+        cols.columnconfigure(0, weight=15)
+        cols.columnconfigure(1, weight=10)
+
+        left_stack = tk.Frame(cols, bg=COLORS["bg"])
+        left_stack.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
 
         # Card 1: Hotkey Setup Controls
-        deaf_card = self._make_card(page, pady=12)
-        deaf_card.pack(fill="x", pady=(0, 12))
+        deaf_card = self._make_card(left_stack, pady=14)
+        deaf_card.pack(fill="x", pady=(0, 14))
 
         deaf_hdr = tk.Frame(deaf_card, bg=COLORS["card"])
         deaf_hdr.pack(fill="x")
+        hdr_txt = tk.Frame(deaf_hdr, bg=COLORS["card"])
+        hdr_txt.pack(side="left", fill="x", expand=True)
         tk.Label(
-            deaf_hdr,
-            text="Toggle Deafen Hotkey",
+            hdr_txt,
+            text="AUTO-DEAFEN",
+            bg=COLORS["card"],
+            fg="#7b7b84",
+            font=("Segoe UI", 8, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            hdr_txt,
+            text="Auto-deafen settings",
             bg=COLORS["card"],
             fg=COLORS["text"],
-            font=("Segoe UI", 12, "bold"),
-        ).pack(side="left")
-
-        self.discord_state_badge = tk.Label(
-            deaf_hdr,
-            text="Disabled",
-            bg=COLORS["pill_idle"],
-            fg=COLORS["subtext"],
-            font=("Segoe UI", 8, "bold"),
-            padx=8,
-            pady=2,
-        )
-        self.discord_state_badge.pack(side="right")
-
-        tk.Label(
-            deaf_card,
-            text="Set a keybind here and match it to Discord → System → Keybinds → Toggle Deafen (auto-undeafens on death, 100%, or exit).",
-            bg=COLORS["card"],
-            fg=COLORS["subtext"],
-            font=("Segoe UI", 9),
-            wraplength=600,
-            justify="left",
-        ).pack(anchor="w", pady=(2, 8))
+            font=("Segoe UI", 11, "bold"),
+        ).pack(anchor="w", pady=(2, 0))
 
         self.auto_deafen_var = tk.BooleanVar(value=bool(self.cfg.get("auto_deafen", False)))
         tk.Checkbutton(
-            deaf_card,
-            text="Enable Discord Auto-Deafen",
+            deaf_hdr,
+            text="Enabled",
             variable=self.auto_deafen_var,
             command=self._on_toggle_auto_deafen,
             bg=COLORS["card"],
@@ -1319,8 +1578,26 @@ class GDQuietApp:
             selectcolor=COLORS["input"],
             activebackground=COLORS["card"],
             activeforeground=COLORS["text"],
-            font=("Segoe UI", 10, "bold"),
-        ).pack(anchor="w", pady=(0, 8))
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side="right", anchor="n")
+
+        tk.Label(
+            deaf_card,
+            text="Automatically toggle Discord deafen past your threshold, then undeafen on death, 100%, or exit.",
+            bg=COLORS["card"],
+            fg=COLORS["subtext"],
+            font=("Segoe UI", 9),
+            wraplength=500,
+            justify="left",
+        ).pack(anchor="w", pady=(4, 12))
+
+        tk.Label(
+            deaf_card,
+            text="TOGGLE DEAFEN HOTKEY",
+            bg=COLORS["card"],
+            fg="#5f5f6a",
+            font=("Segoe UI", 8, "bold"),
+        ).pack(anchor="w", pady=(0, 4))
 
         hk_row = tk.Frame(deaf_card, bg=COLORS["card"])
         hk_row.pack(fill="x")
@@ -1333,11 +1610,13 @@ class GDQuietApp:
             textvariable=self.hotkey_var,
             bg=COLORS["input"],
             fg=COLORS["text"],
-            font=("Consolas", 11, "bold"),
-            padx=14,
-            pady=7,
-            width=22,
-            anchor="w",
+            highlightthickness=1,
+            highlightbackground=COLORS["accent"],
+            font=("Consolas", 10, "bold"),
+            padx=12,
+            pady=6,
+            width=18,
+            anchor="center",
         ).pack(side="left", padx=(0, 10))
 
         self.record_hk_btn = self._make_button(
@@ -1348,22 +1627,35 @@ class GDQuietApp:
             hover_bg=COLORS["accent_hover"],
         )
         self.record_hk_btn.pack(side="left", padx=(0, 8))
-        self._make_button(hk_row, "Test Hotkey", self._test_hotkey).pack(side="left", padx=(0, 8))
-        self._make_button(hk_row, "Clear", self._clear_hotkey).pack(side="left")
+        self._make_button(hk_row, "Test Hotkey", self._test_hotkey, bg=COLORS["card_alt"]).pack(side="left", padx=(0, 8))
+        self._make_button(hk_row, "Clear", self._clear_hotkey, bg=COLORS["card_alt"]).pack(side="left")
+
+        tk.Frame(deaf_card, bg=COLORS["border"], height=1).pack(fill="x", pady=(14, 10))
+
+        self.discord_state_badge = tk.Label(
+            deaf_card,
+            text="Disabled",
+            bg=COLORS["pill_idle"],
+            fg=COLORS["subtext"],
+            font=("Segoe UI", 8, "bold"),
+            padx=9,
+            pady=3,
+        )
+        self.discord_state_badge.pack(anchor="w")
 
         # Card 2: Interactive Discord Deafen Setup Tutorial
-        guide_card = self._make_card(page, pady=12)
+        guide_card = self._make_card(left_stack, pady=14)
         guide_card.pack(fill="both", expand=True)
 
         guide_hdr = tk.Frame(guide_card, bg=COLORS["card"])
-        guide_hdr.pack(fill="x", pady=(0, 8))
+        guide_hdr.pack(fill="x", pady=(0, 10))
 
         tk.Label(
             guide_hdr,
-            text="How to Set Up Discord Auto-Deafen",
+            text="How to set it up",
             bg=COLORS["card"],
             fg=COLORS["text"],
-            font=("Segoe UI", 12, "bold"),
+            font=("Segoe UI", 11, "bold"),
         ).pack(side="left")
 
         tab_box = tk.Frame(guide_hdr, bg=COLORS["card"])
@@ -1389,25 +1681,25 @@ class GDQuietApp:
             (
                 "1",
                 "Open Discord Keybinds",
-                "In Discord, click the cog in the bottom-left, scroll down under Experience, click System, and the Keybinds menu is there.",
+                "Open User Settings → System → Keybinds.",
                 None,
             ),
             (
                 "2",
-                "Create a 'Toggle Deafen' Keybind in Discord",
-                "Click Add a Keybind, set Action to Toggle Deafen (not Toggle Mute), click Record Keybind, and press an unused combo like Ctrl+Shift+D or F8. Avoid Space, Up, W, or Esc.",
+                "Create a Toggle Deafen keybind",
+                "Add a keybind and choose Toggle Deafen, not Toggle Mute. Use an unused combination, such as Ctrl+Shift+D or F8.",
                 None,
             ),
             (
                 "3",
-                "Match & Enable Here in GD Quiet",
-                "Check 'Enable Discord Auto-Deafen' above, click Record Hotkey, and press that exact same keybind.",
+                "Match it in GD Quiet",
+                "Enable auto-deafen, select Record hotkey, and press the exact same key combination.",
                 "step3",
             ),
             (
                 "4",
-                "Test Before Starting a Level",
-                "Join a Discord voice channel and click Test Hotkey above to confirm your headphone icon toggles Deafened on/off. Start each GD run undeafened so death/100% restores it cleanly.",
+                "Test before starting a level",
+                "Join a voice channel and select Test hotkey. Confirm your headphone icon switches between deafened and undeafened.",
                 None,
             ),
         ]
@@ -1420,15 +1712,15 @@ class GDQuietApp:
                 highlightthickness=1,
                 highlightbackground=COLORS["border"],
                 padx=10,
-                pady=6,
+                pady=8,
             )
             row.pack(fill="x", pady=(0, 6))
 
             num_lbl = tk.Label(
                 row,
                 text=num,
-                bg=COLORS["cyan_dark"],
-                fg=COLORS["text"],
+                bg=COLORS["accent_soft"],
+                fg=COLORS["accent_text"],
                 font=("Segoe UI", 9, "bold"),
                 width=2,
                 pady=1,
@@ -1466,7 +1758,7 @@ class GDQuietApp:
                 bg=COLORS["card_alt"],
                 fg=COLORS["subtext"],
                 font=("Segoe UI", 8),
-                wraplength=540,
+                wraplength=480,
                 justify="left",
                 anchor="w",
             ).pack(fill="x", pady=(2, 0))
@@ -1482,7 +1774,7 @@ class GDQuietApp:
             ),
             (
                 "Want to manage YouTube, Spotify, or browser audio instead?",
-                "Open the Apps tab and select those windows — GD Quiet adjusts their audio through Windows without needing any keybinds.",
+                "Open the Apps to Mute tab and select those windows — GD Quiet adjusts their audio through Windows without needing any keybinds.",
             ),
         ]
 
@@ -1500,7 +1792,7 @@ class GDQuietApp:
                 box,
                 text=title,
                 bg=COLORS["card_alt"],
-                fg=COLORS["cyan"],
+                fg=COLORS["accent_text"],
                 font=("Segoe UI", 9, "bold"),
                 anchor="w",
             ).pack(fill="x")
@@ -1510,12 +1802,91 @@ class GDQuietApp:
                 bg=COLORS["card_alt"],
                 fg=COLORS["subtext"],
                 font=("Segoe UI", 8),
-                wraplength=580,
+                wraplength=500,
                 justify="left",
                 anchor="w",
             ).pack(fill="x", pady=(3, 0))
 
         self._show_discord_guide_tab("steps")
+
+        # Right Card: When Discord Undeafens
+        right_card = self._make_card(cols, pady=14)
+        right_card.grid(row=0, column=1, sticky="new")
+
+        tk.Label(
+            right_card,
+            text="When Discord undeafens",
+            bg=COLORS["card"],
+            fg=COLORS["text"],
+            font=("Segoe UI", 11, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            right_card,
+            text="Discord undeafens when you:",
+            bg=COLORS["card"],
+            fg=COLORS["subtext"],
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", pady=(3, 10))
+
+        for item in (
+            "Die or leave the level",
+            "Reach 100% completion",
+            "Unmute & undeafen all",
+        ):
+            chk_row = tk.Frame(right_card, bg=COLORS["card"])
+            chk_row.pack(fill="x", pady=3)
+            tk.Label(chk_row, text="✓", bg=COLORS["card"], fg=COLORS["green_text"], font=("Segoe UI", 9, "bold")).pack(
+                side="left", padx=(0, 8)
+            )
+            tk.Label(chk_row, text=item, bg=COLORS["card"], fg=COLORS["text"], font=("Segoe UI", 9)).pack(side="left")
+
+        before_box = tk.Frame(
+            right_card,
+            bg=COLORS["card_alt"],
+            highlightthickness=1,
+            highlightbackground=COLORS["border"],
+            padx=12,
+            pady=10,
+        )
+        before_box.pack(fill="x", pady=(14, 12))
+        tk.Frame(before_box, bg=COLORS["accent"], width=2).pack(side="left", fill="y", padx=(0, 10))
+        b_txt = tk.Frame(before_box, bg=COLORS["card_alt"])
+        b_txt.pack(side="left", fill="x", expand=True)
+        tk.Label(
+            b_txt,
+            text="BEFORE EVERY RUN",
+            bg=COLORS["card_alt"],
+            fg="#6b6b76",
+            font=("Segoe UI", 8, "bold"),
+        ).pack(anchor="w", pady=(0, 3))
+        tk.Label(
+            b_txt,
+            text="Start undeafened so GD Quiet can restore your audio correctly at the end of the attempt.",
+            bg=COLORS["card_alt"],
+            fg=COLORS["subtext"],
+            font=("Segoe UI", 8),
+            wraplength=240,
+            justify="left",
+        ).pack(anchor="w")
+
+        self._make_button(
+            right_card,
+            "Troubleshooting",
+            lambda: self._show_discord_guide_tab("fixes"),
+            bg=COLORS["card_alt"],
+            padx=10,
+            pady=6,
+            font=("Segoe UI", 9, "bold"),
+        ).pack(fill="x", pady=(0, 10))
+
+        tk.Label(
+            right_card,
+            text="Avoid Space, Up, W, or Esc as hotkeys.",
+            bg=COLORS["card"],
+            fg="#5f5f6a",
+            font=("Segoe UI", 8),
+            anchor="w",
+        ).pack(anchor="w")
 
     def _show_discord_guide_tab(self, tab_key: str) -> None:
         self.guide_steps_frame.pack_forget()
@@ -1536,170 +1907,240 @@ class GDQuietApp:
         page = tk.Frame(self.main_area, bg=COLORS["bg"])
         self._pages["capture"] = page
 
-        tk.Label(
+        self._make_page_header(
             page,
-            text="Screen Capture",
-            bg=COLORS["bg"],
-            fg=COLORS["text"],
-            font=("Segoe UI", 17, "bold"),
-        ).pack(anchor="w")
-        tk.Label(
-            page,
-            text="Choose which game window to watch and preview what GD Quiet sees.",
-            bg=COLORS["bg"],
-            fg=COLORS["subtext"],
-            font=("Segoe UI", 9),
-        ).pack(anchor="w", pady=(2, 14))
-
-        cap_card = self._make_card(page)
-        cap_card.pack(fill="x", pady=(0, 14))
-
-        row1 = tk.Frame(cap_card, bg=COLORS["card"])
-        row1.pack(fill="x", pady=(0, 12))
-        tk.Label(row1, text="Target Window:", bg=COLORS["card"], fg=COLORS["text"], font=("Segoe UI", 9, "bold")).pack(
-            side="left", padx=(0, 8)
+            "GD QUIET / SCREEN CAPTURE",
+            "Screen Capture",
+            "Choose a game window and the area to read.",
         )
 
+        cols = tk.Frame(page, bg=COLORS["bg"])
+        cols.pack(fill="both", expand=True)
+        cols.columnconfigure(0, weight=14)
+        cols.columnconfigure(1, weight=10)
+
+        left_stack = tk.Frame(cols, bg=COLORS["bg"])
+        left_stack.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
+
+        # Target Window Card
+        target_card = self._make_card(left_stack, pady=14)
+        target_card.pack(fill="x", pady=(0, 14))
+
+        tk.Label(target_card, text="Target window", bg=COLORS["card"], fg=COLORS["text"], font=("Segoe UI", 11, "bold")).pack(
+            anchor="w"
+        )
+        tk.Label(
+            target_card,
+            text="Choose the Geometry Dash window to watch.",
+            bg=COLORS["card"],
+            fg=COLORS["subtext"],
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", pady=(2, 10))
+
+        row1 = tk.Frame(target_card, bg=COLORS["card"])
+        row1.pack(fill="x")
         self.target_proc_var = tk.StringVar(value=str(self.cfg.get("target_process") or "geometrydash.exe"))
         self.target_combo = ttk.Combobox(
             row1,
             textvariable=self.target_proc_var,
             state="normal",
-            width=32,
+            width=30,
             style="Dark.TCombobox",
         )
-        self.target_combo.pack(side="left", padx=(0, 8))
+        self.target_combo.pack(side="left", fill="x", expand=True, padx=(0, 8))
         self.target_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_target_proc_change())
         self.target_combo.bind("<Return>", lambda _e: self._on_target_proc_change())
-        self._make_button(row1, "Refresh", self._refresh_target_windows, padx=10, pady=4).pack(side="left")
-
-        presets_row = tk.Frame(cap_card, bg=COLORS["card"])
-        presets_row.pack(fill="x", pady=(0, 10))
-        tk.Label(
-            presets_row,
-            text="Quick % Spot:",
-            bg=COLORS["card"],
-            fg=COLORS["text"],
-            font=("Segoe UI", 9, "bold"),
-        ).pack(side="left", padx=(0, 8))
-        self._make_button(
-            presets_row,
-            "Auto Top 10%",
-            self._reset_auto_region,
-            padx=9,
-            pady=4,
-            font=("Segoe UI", 8, "bold"),
-        ).pack(side="left", padx=(0, 6))
-        for p_label, p_rx, p_ry, p_rw, p_rh in PERCENT_PRESETS:
-            self._make_button(
-                presets_row,
-                p_label,
-                lambda lbl=p_label, rx=p_rx, ry=p_ry, rw=p_rw, rh=p_rh: self._apply_region_preset(
-                    lbl, rx, ry, rw, rh
-                ),
-                padx=9,
-                pady=4,
-                font=("Segoe UI", 8, "bold"),
-            ).pack(side="left", padx=(0, 6))
-
-        row2 = tk.Frame(cap_card, bg=COLORS["card"])
-        row2.pack(fill="x")
-        self._make_button(
-            row2,
-            "Drag Box on Screen",
-            self._start_region_pick,
-            bg=COLORS["cyan"],
-            fg="#082f49",
-            hover_bg="#7dd3fc",
-        ).pack(side="left", padx=(0, 8))
-        self.delay_pick_btn = self._make_button(
-            row2,
-            "Pick with 3s Delay",
-            self._start_region_pick_delayed,
-            padx=10,
-            pady=6,
-            font=("Segoe UI", 8, "bold"),
+        self._make_button(row1, "Refresh Windows", self._refresh_target_windows, bg=COLORS["card_alt"], padx=10, pady=4).pack(
+            side="left"
         )
-        self.delay_pick_btn.pack(side="left", padx=(0, 12))
-        self.region_mode_label = tk.Label(
-            row2,
-            text=self._describe_region_mode(),
-            bg=COLORS["card"],
-            fg=COLORS["subtext"],
-            font=("Segoe UI", 9),
-        )
-        self.region_mode_label.pack(side="left")
 
-        # Live preview card
-        prev_card = self._make_card(page)
+        self.watch_status_label = tk.Label(
+            target_card,
+            text="Waiting for Geometry Dash...",
+            bg=COLORS["card"],
+            fg=COLORS["amber"],
+            font=("Segoe UI", 8, "bold"),
+            anchor="w",
+        )
+        self.watch_status_label.pack(anchor="w", pady=(10, 0))
+
+        # Live Capture Preview Card
+        prev_card = self._make_card(left_stack, pady=14)
         prev_card.pack(fill="both", expand=True)
 
-        tk.Label(
-            prev_card,
-            text="Live Capture Preview",
-            bg=COLORS["card"],
-            fg=COLORS["text"],
-            font=("Segoe UI", 11, "bold"),
-        ).pack(anchor="w", pady=(0, 8))
+        tk.Label(prev_card, text="Capture preview", bg=COLORS["card"], fg=COLORS["text"], font=("Segoe UI", 11, "bold")).pack(
+            anchor="w"
+        )
+        tk.Label(prev_card, text="What GD Quiet sees", bg=COLORS["card"], fg=COLORS["subtext"], font=("Segoe UI", 9)).pack(
+            anchor="w", pady=(2, 10)
+        )
 
         prev_box = tk.Frame(
             prev_card,
-            bg=COLORS["input"],
+            bg=COLORS["plot"],
             highlightthickness=1,
             highlightbackground=COLORS["border"],
             padx=14,
             pady=14,
         )
-        prev_box.pack(fill="x", pady=(0, 10))
+        prev_box.pack(fill="both", expand=True, pady=(0, 10))
 
         self.preview_label = tk.Label(
             prev_box,
             text="Waiting for capture...",
-            bg="#090d12",
+            bg="#101014",
             fg=COLORS["subtext"],
             width=44,
-            height=5,
+            height=6,
             font=("Segoe UI", 9),
         )
-        self.preview_label.pack(pady=(0, 10))
+        self.preview_label.pack(expand=True, pady=(6, 10))
 
+        pbar = tk.Frame(prev_card, bg=COLORS["card"])
+        pbar.pack(fill="x")
         self.detected_pct_label = tk.Label(
-            prev_box,
+            pbar,
             text="Detected: --%",
-            bg=COLORS["input"],
+            bg=COLORS["card"],
             fg=COLORS["text"],
-            font=("Consolas", 14, "bold"),
+            font=("Consolas", 11, "bold"),
         )
         self.detected_pct_label.pack(anchor="w")
 
-        self.watch_status_label = tk.Label(
-            prev_box,
-            text="Waiting for Geometry Dash...",
-            bg=COLORS["input"],
-            fg=COLORS["subtext"],
-            font=("Segoe UI", 9),
-        )
-        self.watch_status_label.pack(anchor="w", pady=(2, 0))
-
         self.ocr_diagnostics_label = tk.Label(
-            prev_box,
+            prev_card,
             text="OCR diagnostics: waiting for first scan",
-            bg=COLORS["input"],
-            fg=COLORS["subtext"],
+            bg=COLORS["card"],
+            fg=COLORS["faint"],
             font=("Consolas", 8),
             anchor="w",
             justify="left",
-            wraplength=680,
+            wraplength=480,
         )
-        self.ocr_diagnostics_label.pack(anchor="w", fill="x", pady=(5, 0))
+        self.ocr_diagnostics_label.pack(anchor="w", fill="x", pady=(4, 0))
 
+        # Right Card: Percentage Position & Custom Region
+        pos_card = self._make_card(cols, pady=14)
+        pos_card.grid(row=0, column=1, sticky="new")
+
+        tk.Label(pos_card, text="Percentage position", bg=COLORS["card"], fg=COLORS["text"], font=("Segoe UI", 11, "bold")).pack(
+            anchor="w"
+        )
         tk.Label(
-            prev_card,
-            text="For best accuracy, run Geometry Dash in Borderless or Windowed mode with 'Show Percentage' enabled.",
+            pos_card,
+            text="Choose where the percentage appears.",
             bg=COLORS["card"],
             fg=COLORS["subtext"],
-            font=("Segoe UI", 8),
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", pady=(2, 12))
+
+        opts_grid = tk.Frame(pos_card, bg=COLORS["card"])
+        opts_grid.pack(fill="x")
+        opts_grid.columnconfigure(0, weight=1)
+        opts_grid.columnconfigure(1, weight=1)
+
+        self._make_button(
+            opts_grid,
+            "Auto Top 10%",
+            self._reset_auto_region,
+            bg=COLORS["card_alt"],
+            padx=8,
+            pady=6,
+            font=("Segoe UI", 8, "bold"),
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 6), pady=(0, 6))
+
+        for idx, (p_label, p_rx, p_ry, p_rw, p_rh) in enumerate(PERCENT_PRESETS, start=1):
+            r, c = divmod(idx, 2)
+            span = 2 if idx == len(PERCENT_PRESETS) and idx % 2 == 0 else 1
+            btn = self._make_button(
+                opts_grid,
+                p_label,
+                lambda lbl=p_label, rx=p_rx, ry=p_ry, rw=p_rw, rh=p_rh: self._apply_region_preset(
+                    lbl, rx, ry, rw, rh
+                ),
+                bg=COLORS["card_alt"],
+                padx=8,
+                pady=6,
+                font=("Segoe UI", 8, "bold"),
+            )
+            btn.grid(
+                row=r,
+                column=c,
+                columnspan=span,
+                sticky="ew",
+                padx=(0, 6) if c == 0 and span == 1 else (0, 0),
+                pady=(0, 6),
+            )
+
+        tk.Label(
+            pos_card,
+            text="CUSTOM REGION",
+            bg=COLORS["card"],
+            fg="#5b5b66",
+            font=("Segoe UI", 8, "bold"),
+        ).pack(anchor="w", pady=(12, 6))
+
+        self._make_button(
+            pos_card,
+            "Drag Box on Screen",
+            self._start_region_pick,
+            bg=COLORS["accent"],
+            fg=COLORS["text"],
+            hover_bg=COLORS["accent_hover"],
+        ).pack(fill="x", pady=(0, 6))
+        self.delay_pick_btn = self._make_button(
+            pos_card,
+            "Pick with 3s Delay",
+            self._start_region_pick_delayed,
+            bg=COLORS["card_alt"],
+            padx=10,
+            pady=6,
+            font=("Segoe UI", 8, "bold"),
+        )
+        self.delay_pick_btn.pack(fill="x")
+
+        tk.Frame(pos_card, bg=COLORS["border"], height=1).pack(fill="x", pady=(14, 10))
+        tk.Label(
+            pos_card,
+            text="CURRENT REGION",
+            bg=COLORS["card"],
+            fg="#5b5b66",
+            font=("Segoe UI", 8, "bold"),
+        ).pack(anchor="w", pady=(0, 3))
+        self.region_mode_label = tk.Label(
+            pos_card,
+            text=self._describe_region_mode(),
+            bg=COLORS["card"],
+            fg=COLORS["text"],
+            font=("Segoe UI", 9, "bold"),
+            anchor="w",
+        )
+        self.region_mode_label.pack(anchor="w")
+
+        # Bottom tip box
+        tip_box = tk.Frame(
+            page,
+            bg=COLORS["card_alt"],
+            highlightthickness=1,
+            highlightbackground=COLORS["border"],
+            padx=14,
+            pady=10,
+        )
+        tip_box.pack(fill="x", pady=(14, 0))
+        tk.Label(
+            tip_box,
+            text="Tips for accurate detection",
+            bg=COLORS["card_alt"],
+            fg=COLORS["text"],
+            font=("Segoe UI", 9, "bold"),
         ).pack(anchor="w")
+        tk.Label(
+            tip_box,
+            text='Run Geometry Dash in Borderless or Windowed mode with "Show Percentage" enabled for the best accuracy.',
+            bg=COLORS["card_alt"],
+            fg=COLORS["subtext"],
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", pady=(2, 0))
 
     def _on_global_mousewheel(self, event: tk.Event) -> None:
         delta = int(-1 * (event.delta / 120)) if event.delta else 0
@@ -1714,18 +2155,12 @@ class GDQuietApp:
         page = tk.Frame(self.main_area, bg=COLORS["bg"])
         self._pages["settings"] = page
 
-        hdr = tk.Frame(page, bg=COLORS["bg"])
-        hdr.pack(fill="x", pady=(0, 10))
-        tk.Label(hdr, text="Settings", bg=COLORS["bg"], fg=COLORS["text"], font=("Segoe UI", 17, "bold")).pack(
-            anchor="w"
+        self._make_page_header(
+            page,
+            "GD QUIET / SETTINGS",
+            "Settings",
+            "Adjust audio, capture, hotkeys, and window settings.",
         )
-        tk.Label(
-            hdr,
-            text="Configure muting behavior, OCR timing, Discord cooldowns, window preferences, and data.",
-            bg=COLORS["bg"],
-            fg=COLORS["subtext"],
-            font=("Segoe UI", 9),
-        ).pack(anchor="w", pady=(2, 0))
 
         scroll_wrap = tk.Frame(page, bg=COLORS["bg"])
         scroll_wrap.pack(fill="both", expand=True)
@@ -1746,6 +2181,9 @@ class GDQuietApp:
         self.settings_canvas.configure(yscrollcommand=settings_scroll.set)
         self.settings_canvas.pack(side="left", fill="both", expand=True)
         settings_scroll.pack(side="right", fill="y")
+
+        self.settings_body.columnconfigure(0, weight=1)
+        self.settings_body.columnconfigure(1, weight=1)
 
         self._settings_num_vars: dict[str, tuple[tk.StringVar, float, float, bool]] = {}
 
@@ -1768,18 +2206,21 @@ class GDQuietApp:
                 selectcolor=COLORS["input"],
                 activebackground=COLORS["card"],
                 activeforeground=COLORS["text"],
-                font=("Segoe UI", 10, "bold"),
+                font=("Segoe UI", 9, "bold"),
                 anchor="w",
             )
             chk.pack(anchor="w")
-            tk.Label(
-                row,
-                text=desc,
-                bg=COLORS["card"],
-                fg=COLORS["subtext"],
-                font=("Segoe UI", 8),
-                anchor="w",
-            ).pack(anchor="w", padx=(24, 0))
+            if desc:
+                tk.Label(
+                    row,
+                    text=desc,
+                    bg=COLORS["card"],
+                    fg=COLORS["faint"],
+                    font=("Segoe UI", 8),
+                    anchor="w",
+                    wraplength=360,
+                    justify="left",
+                ).pack(anchor="w", padx=(24, 0))
 
         def add_number_row(
             parent: tk.Frame,
@@ -1793,9 +2234,14 @@ class GDQuietApp:
         ) -> None:
             row = tk.Frame(parent, bg=COLORS["card"])
             row.pack(fill="x", pady=4)
-            tk.Label(row, text=label, bg=COLORS["card"], fg=COLORS["text"], font=("Segoe UI", 9, "bold")).pack(
-                side="left"
-            )
+            tk.Label(
+                row,
+                text=label,
+                bg=COLORS["card"],
+                fg="#d4d4d8",
+                font=("Segoe UI", 9),
+                anchor="w",
+            ).pack(side="left", fill="x", expand=True)
             val = self.cfg.get(key, DEFAULT_CONFIG[key])
             sval = f"{int(round(float(val)))}" if is_int else f"{float(val):.2f}".rstrip("0").rstrip(".")
             var = tk.StringVar(value=sval)
@@ -1806,17 +2252,19 @@ class GDQuietApp:
             entry = tk.Entry(
                 right,
                 textvariable=var,
-                width=7,
+                width=6,
                 bg=COLORS["input"],
                 fg=COLORS["text"],
                 insertbackground=COLORS["text"],
+                highlightthickness=1,
+                highlightbackground=COLORS["border"],
                 relief="flat",
-                font=("Consolas", 10, "bold"),
-                justify="center",
+                font=("Consolas", 9, "bold"),
+                justify="right",
             )
-            entry.pack(side="left", ipady=3, padx=(0, 6))
-            tk.Label(right, text=unit, bg=COLORS["card"], fg=COLORS["subtext"], font=("Segoe UI", 8), width=6, anchor="w").pack(
-                side="left", padx=(0, 6)
+            entry.pack(side="left", ipady=3, padx=(0, 5))
+            tk.Label(right, text=unit, bg=COLORS["card"], fg="#5f5f6a", font=("Segoe UI", 8), width=5, anchor="w").pack(
+                side="left", padx=(0, 5)
             )
 
             def apply_num(_e: Any = None) -> None:
@@ -1835,21 +2283,31 @@ class GDQuietApp:
                     on_apply(float(final_val))
 
             entry.bind("<Return>", apply_num)
-            self._make_button(right, "Apply", apply_num, bg=COLORS["card_alt"], padx=10, pady=3, font=("Segoe UI", 8, "bold")).pack(
-                side="left"
-            )
+            self._make_button(
+                right,
+                "Apply",
+                apply_num,
+                bg=COLORS["card_alt"],
+                fg=COLORS["subtext"],
+                padx=8,
+                pady=2,
+                font=("Segoe UI", 8, "bold"),
+            ).pack(side="left")
 
-        # Card 1: Trigger & Muting Behavior
+        # Card 1: Trigger & muting (row 0, col 0)
         c1 = self._make_card(self.settings_body, pady=12)
-        c1.pack(fill="x", pady=(0, 12))
-        tk.Label(c1, text="Trigger & Muting Behavior", bg=COLORS["card"], fg=COLORS["cyan"], font=("Segoe UI", 11, "bold")).pack(
-            anchor="w", pady=(0, 6)
+        c1.grid(row=0, column=0, sticky="nsew", padx=(0, 12), pady=(0, 12))
+        tk.Label(c1, text="Trigger & muting", bg=COLORS["card"], fg=COLORS["text"], font=("Segoe UI", 10, "bold")).pack(
+            anchor="w"
+        )
+        tk.Label(c1, text="When and how selected apps are muted.", bg=COLORS["card"], fg=COLORS["faint"], font=("Segoe UI", 8)).pack(
+            anchor="w", pady=(1, 8)
         )
         add_number_row(
             c1,
             "mute_at_percent",
-            "Audio Action Threshold Percent",
-            "% (0-100)",
+            "Audio action threshold",
+            "%",
             0.0,
             100.0,
             is_int=False,
@@ -1857,13 +2315,7 @@ class GDQuietApp:
         )
         mode_row = tk.Frame(c1, bg=COLORS["card"])
         mode_row.pack(fill="x", pady=4)
-        tk.Label(
-            mode_row,
-            text="Audio Action",
-            bg=COLORS["card"],
-            fg=COLORS["text"],
-            font=("Segoe UI", 9, "bold"),
-        ).pack(side="left")
+        tk.Label(mode_row, text="Audio action", bg=COLORS["card"], fg="#d4d4d8", font=("Segoe UI", 9)).pack(side="left")
         self.audio_mode_var = tk.StringVar(value=str(self.cfg.get("audio_mode", "mute")))
         audio_mode_combo = ttk.Combobox(
             mode_row,
@@ -1875,15 +2327,12 @@ class GDQuietApp:
         )
         audio_mode_combo.pack(side="right")
         audio_mode_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_audio_mode_changed())
+
         fade_row = tk.Frame(c1, bg=COLORS["card"])
         fade_row.pack(fill="x", pady=4)
-        tk.Label(
-            fade_row,
-            text="Fade Audio Before Threshold",
-            bg=COLORS["card"],
-            fg=COLORS["text"],
-            font=("Segoe UI", 9, "bold"),
-        ).pack(side="left")
+        tk.Label(fade_row, text="Fade before threshold", bg=COLORS["card"], fg="#d4d4d8", font=("Segoe UI", 9)).pack(
+            side="left"
+        )
         self.fade_in_mode_var = tk.StringVar(value=str(self.cfg.get("fade_in_mode", "off")))
         fade_mode_combo = ttk.Combobox(
             fade_row,
@@ -1895,29 +2344,12 @@ class GDQuietApp:
         )
         fade_mode_combo.pack(side="right")
         fade_mode_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_fade_in_mode_changed())
-        tk.Label(
-            c1,
-            text="Slow fades across 15%; Fast fades across 5%. At the threshold, the selected audio action applies.",
-            bg=COLORS["card"],
-            fg=COLORS["subtext"],
-            font=("Segoe UI", 8),
-            anchor="w",
-            wraplength=500,
-            justify="left",
-        ).pack(anchor="w", pady=(0, 4))
-        tk.Label(
-            c1,
-            text="Duck lowers selected apps; optional Discord auto-deafen remains separate.",
-            bg=COLORS["card"],
-            fg=COLORS["subtext"],
-            font=("Segoe UI", 8),
-            anchor="w",
-        ).pack(anchor="w", padx=(0, 0), pady=(0, 4))
+
         add_number_row(
             c1,
             "ducking_volume",
-            "Ducked App Volume",
-            "% (0-100)",
+            "Ducked app volume",
+            "%",
             0.0,
             100.0,
             is_int=False,
@@ -1926,7 +2358,7 @@ class GDQuietApp:
         add_number_row(
             c1,
             "missing_timeout_s",
-            "Restore Audio Delay After % Disappears (Death / Exit)",
+            "Restore delay after death / exit",
             "sec",
             0.05,
             5.0,
@@ -1935,22 +2367,23 @@ class GDQuietApp:
         add_number_row(
             c1,
             "remute_interval_s",
-            "Re-Enforce Audio Action Interval (New Audio Streams)",
+            "Re-enforce interval (new streams)",
             "sec",
             0.1,
             5.0,
             is_int=False,
         )
+        tk.Frame(c1, bg=COLORS["border"], height=1).pack(fill="x", pady=(6, 6))
         add_toggle(
             c1,
-            "Restore Audio & Undeafen at 100% (Level Complete)",
+            "Restore audio & undeafen at 100%",
             "Automatically restore selected-app audio and Discord when reaching 100%.",
             self.unmute_100_var,
             self._on_toggle_unmute_100,
         )
         add_toggle(
             c1,
-            "Show Background Audio Processes",
+            "Show background audio processes",
             "Include apps without visible windows in the audio apps list.",
             self.bg_audio_var,
             self._on_toggle_bg_audio,
@@ -1958,57 +2391,40 @@ class GDQuietApp:
         self.sound_feedback_var = tk.BooleanVar(value=bool(self.cfg.get("sound_feedback", False)))
         add_toggle(
             c1,
-            "Play Sound Chime on Audio Change",
-            "Plays a subtle Windows notification sound whenever GD Quiet changes selected-app audio.",
+            "Play sound chime on audio change",
+            "Plays a subtle Windows notification sound when audio changes.",
             self.sound_feedback_var,
             self._on_toggle_sound_feedback,
         )
 
-        # Card 2: OCR & Screen Capture
+        # Card 2: OCR & screen capture (row 0, col 1)
         c2 = self._make_card(self.settings_body, pady=12)
-        c2.pack(fill="x", pady=(0, 12))
-        tk.Label(c2, text="OCR & Screen Capture", bg=COLORS["card"], fg=COLORS["cyan"], font=("Segoe UI", 11, "bold")).pack(
-            anchor="w", pady=(0, 6)
+        c2.grid(row=0, column=1, sticky="nsew", pady=(0, 12))
+        tk.Label(c2, text="OCR & screen capture", bg=COLORS["card"], fg=COLORS["text"], font=("Segoe UI", 10, "bold")).pack(
+            anchor="w"
         )
+        tk.Label(
+            c2,
+            text="How often the percentage is read from the game.",
+            bg=COLORS["card"],
+            fg=COLORS["faint"],
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", pady=(1, 8))
         self.settings_watch_enabled_var = tk.BooleanVar(value=bool(self.cfg.get("watch_enabled", True)))
         add_toggle(
             c2,
-            "Enable Screen % Watching",
+            "Enable screen percentage watching",
             "Master toggle for capturing the screen and muting apps automatically.",
             self.settings_watch_enabled_var,
             self._on_settings_watch_toggle,
         )
-        add_number_row(
-            c2,
-            "scan_interval_playing_ms",
-            "Scan Interval While Playing",
-            "ms",
-            5.0,
-            500.0,
-            is_int=True,
-        )
-        add_number_row(
-            c2,
-            "scan_interval_idle_ms",
-            "Scan Interval in Menus / Idle",
-            "ms",
-            10.0,
-            1000.0,
-            is_int=True,
-        )
-        add_number_row(
-            c2,
-            "preview_interval_ms",
-            "Live Capture Preview Refresh Interval",
-            "ms",
-            50.0,
-            2000.0,
-            is_int=True,
-        )
+        add_number_row(c2, "scan_interval_playing_ms", "Scan interval while playing", "ms", 5.0, 500.0, is_int=True)
+        add_number_row(c2, "scan_interval_idle_ms", "Scan interval in menus / idle", "ms", 10.0, 1000.0, is_int=True)
+        add_number_row(c2, "preview_interval_ms", "Live preview refresh interval", "ms", 50.0, 2000.0, is_int=True)
         add_number_row(
             c2,
             "test_duration_s",
-            "Screen Test Duration",
+            "Screen test duration",
             "sec",
             5.0,
             120.0,
@@ -2016,40 +2432,63 @@ class GDQuietApp:
             on_apply=self._on_settings_test_duration_applied,
         )
 
-        # Card 3: Discord & Hotkeys
+        # Card 3: Discord & hotkeys (row 1, col 0)
         c3 = self._make_card(self.settings_body, pady=12)
-        c3.pack(fill="x", pady=(0, 12))
-        tk.Label(c3, text="Discord & Hotkeys", bg=COLORS["card"], fg=COLORS["cyan"], font=("Segoe UI", 11, "bold")).pack(
-            anchor="w", pady=(0, 6)
+        c3.grid(row=1, column=0, sticky="nsew", padx=(0, 12), pady=(0, 12))
+        tk.Label(c3, text="Discord & hotkeys", bg=COLORS["card"], fg=COLORS["text"], font=("Segoe UI", 10, "bold")).pack(
+            anchor="w"
         )
+        tk.Label(
+            c3,
+            text="Automatic deafen and the cooldown between toggles.",
+            bg=COLORS["card"],
+            fg=COLORS["faint"],
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", pady=(1, 8))
         add_toggle(
             c3,
-            "Enable Discord Auto-Deafen",
-            "Send your Discord Toggle Deafen keybind when crossing the configured threshold.",
+            "Enable Discord auto-deafen",
+            "Send your Discord Toggle Deafen keybind when crossing the threshold.",
             self.auto_deafen_var,
             self._on_toggle_auto_deafen,
         )
         add_number_row(
             c3,
             "discord_cooldown_ms",
-            "Discord Hotkey Toggle Cooldown",
+            "Discord hotkey toggle cooldown",
             "ms",
             0.0,
             2000.0,
             is_int=True,
             on_apply=lambda v: self.discord_ctrl.set_cooldown_ms(v),
         )
+        tk.Label(
+            c3,
+            text="Set the same Toggle Deafen keybind in Discord and in GD Quiet so both stay in sync.",
+            bg=COLORS["card"],
+            fg=COLORS["faint"],
+            font=("Segoe UI", 8),
+            wraplength=360,
+            justify="left",
+        ).pack(anchor="w", pady=(8, 0))
 
-        # Card 4: Window & Updates
+        # Card 4: Window & updates (row 1, col 1)
         c4 = self._make_card(self.settings_body, pady=12)
-        c4.pack(fill="x", pady=(0, 12))
-        tk.Label(c4, text="Window & Updates", bg=COLORS["card"], fg=COLORS["cyan"], font=("Segoe UI", 11, "bold")).pack(
-            anchor="w", pady=(0, 6)
+        c4.grid(row=1, column=1, sticky="nsew", pady=(0, 12))
+        tk.Label(c4, text="Window & updates", bg=COLORS["card"], fg=COLORS["text"], font=("Segoe UI", 10, "bold")).pack(
+            anchor="w"
         )
+        tk.Label(
+            c4,
+            text="How GD Quiet behaves on your desktop.",
+            bg=COLORS["card"],
+            fg=COLORS["faint"],
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", pady=(1, 8))
         self.always_on_top_var = tk.BooleanVar(value=bool(self.cfg.get("always_on_top", False)))
         add_toggle(
             c4,
-            "Always on Top",
+            "Always on top",
             "Keep the GD Quiet window floating above other windows.",
             self.always_on_top_var,
             self._on_toggle_always_on_top,
@@ -2057,7 +2496,7 @@ class GDQuietApp:
         self.start_minimized_var = tk.BooleanVar(value=bool(self.cfg.get("start_minimized", False)))
         add_toggle(
             c4,
-            "Start Minimized",
+            "Start minimized",
             "Minimize GD Quiet to the taskbar automatically when launched.",
             self.start_minimized_var,
             self._on_toggle_start_minimized,
@@ -2065,99 +2504,129 @@ class GDQuietApp:
         self.close_to_tray_var = tk.BooleanVar(value=bool(self.cfg.get("close_to_tray", False)))
         add_toggle(
             c4,
-            "Close to System Tray",
-            "Keep GD Quiet running in the tray when the window is closed. Use Exit in the tray menu to quit.",
+            "Close to system tray",
+            "Keep GD Quiet running in the tray when closed.",
             self.close_to_tray_var,
             self._on_toggle_close_to_tray,
         )
         self.auto_updates_var = tk.BooleanVar(value=bool(self.cfg.get("auto_check_updates", True)))
         add_toggle(
             c4,
-            "Automatically Check for Updates",
-            "Check GitHub Releases on startup and every 5 minutes for GDQuiet-Setup.exe updates.",
+            "Automatically check for updates",
+            "Check GitHub Releases on startup and every 5 minutes.",
             self.auto_updates_var,
             self._on_toggle_auto_updates,
         )
         self.beta_updates_var = tk.BooleanVar(value=bool(self.cfg.get("beta_updates", False)))
         add_toggle(
             c4,
-            "Beta Updates (Opt In)",
-            "Allow prerelease versions to appear in the updater. Disabled by default.",
+            "Beta updates (opt in)",
+            "Allow prerelease versions to appear in the updater.",
             self.beta_updates_var,
             self._on_toggle_beta_updates,
         )
 
-        # Experimental level detection is deliberately opt-in and disabled by default.
+        # Card 5: Experimental features (row 2, col 0)
         c5 = self._make_card(self.settings_body, pady=12)
-        c5.pack(fill="x", pady=(0, 12))
-        tk.Label(
-            c5,
-            text="Experimental Features (Beta)",
-            bg=COLORS["card"],
-            fg=COLORS["amber"],
-            font=("Segoe UI", 11, "bold"),
-        ).pack(
-            anchor="w", pady=(0, 6)
+        c5.grid(row=2, column=0, sticky="nsew", padx=(0, 12), pady=(0, 12))
+        tk.Label(c5, text="Experimental features", bg=COLORS["card"], fg=COLORS["amber"], font=("Segoe UI", 10, "bold")).pack(
+            anchor="w"
+        )
+        tk.Label(c5, text="Early features that may still change.", bg=COLORS["card"], fg=COLORS["faint"], font=("Segoe UI", 8)).pack(
+            anchor="w", pady=(1, 8)
         )
         self.level_detection_var = tk.BooleanVar(value=bool(self.cfg.get("level_detection_beta", False)))
         add_toggle(
             c5,
-            "BETA: Detect level names (risky)",
-            "Experimental OCR scans about once per second while screen watching is active and only reads a title on the pause screen. It never pauses or controls Geometry Dash. Misreads are expected; corrections are stored locally, and screenshots are not saved or uploaded.",
+            "Detect level names (beta)",
+            "Reads the level name from the pause screen and stores corrections locally.",
             self.level_detection_var,
             self._on_toggle_level_detection,
         )
 
-        # Card 6: OBS Browser Source
-        obs_card = self._make_card(self.settings_body, pady=12)
-        obs_card.pack(fill="x", pady=(0, 12))
+        # Card 6: Local settings (row 2, col 1)
+        c_local = self._make_card(self.settings_body, pady=12)
+        c_local.grid(row=2, column=1, sticky="nsew", pady=(0, 12))
+        tk.Label(c_local, text="Local settings", bg=COLORS["card"], fg=COLORS["text"], font=("Segoe UI", 10, "bold")).pack(
+            anchor="w"
+        )
+        tk.Label(c_local, text="Where your configuration lives.", bg=COLORS["card"], fg=COLORS["faint"], font=("Segoe UI", 8)).pack(
+            anchor="w", pady=(1, 8)
+        )
         tk.Label(
-            obs_card,
-            text="OBS Studio Overlay",
+            c_local,
+            text="Every setting on this page saves automatically to a local config file on this PC. Nothing is uploaded, and no account is required.",
             bg=COLORS["card"],
-            fg=COLORS["cyan"],
-            font=("Segoe UI", 11, "bold"),
+            fg=COLORS["faint"],
+            font=("Segoe UI", 8),
+            wraplength=360,
+            justify="left",
         ).pack(anchor="w", pady=(0, 6))
         tk.Label(
-            obs_card,
-            text=(
-                "Show live progress, mute state, and the current threshold in OBS. "
-                "The overlay also lets you pause watching and adjust the threshold; use OBS's "
-                "right-click → Interact menu to operate its controls."
-            ),
+            c_local,
+            text="Resetting to defaults restores the original values for audio, capture, hotkeys and window behaviour.",
             bg=COLORS["card"],
-            fg=COLORS["subtext"],
-            font=("Segoe UI", 9),
-            wraplength=680,
+            fg=COLORS["faint"],
+            font=("Segoe UI", 8),
+            wraplength=360,
             justify="left",
-        ).pack(anchor="w", fill="x", pady=(0, 10))
+        ).pack(anchor="w")
+
+        # Card 7: OBS Studio overlay (row 3, col 0..1 span 2)
+        obs_card = self._make_card(self.settings_body, pady=12)
+        obs_card.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=(0, 12))
+        tk.Label(obs_card, text="OBS Studio overlay", bg=COLORS["card"], fg=COLORS["text"], font=("Segoe UI", 10, "bold")).pack(
+            anchor="w"
+        )
         tk.Label(
             obs_card,
-            text="Add a Browser Source at 560 × 300 and use this local URL:",
+            text="Show live progress and mute state in your stream (Browser Source at 560 x 300).",
             bg=COLORS["card"],
-            fg=COLORS["text"],
-            font=("Segoe UI", 9, "bold"),
-        ).pack(anchor="w", pady=(0, 5))
+            fg=COLORS["faint"],
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", pady=(1, 8))
+
+        self.obs_overlay_status_lbl = tk.Label(
+            obs_card,
+            text=self._obs_overlay_status_text(),
+            bg=COLORS["green_bg"] if self.obs_overlay_server.running else COLORS["pill_idle"],
+            fg=COLORS["green_text"] if self.obs_overlay_server.running else COLORS["subtext"],
+            font=("Segoe UI", 8, "bold"),
+            padx=8,
+            pady=3,
+        )
+        self.obs_overlay_status_lbl.pack(anchor="w", pady=(0, 8))
+
+        tk.Label(
+            obs_card,
+            text="BROWSER SOURCE URL",
+            bg=COLORS["card"],
+            fg="#5f5f68",
+            font=("Segoe UI", 8, "bold"),
+        ).pack(anchor="w", pady=(0, 4))
 
         obs_url_row = tk.Frame(obs_card, bg=COLORS["card"])
-        obs_url_row.pack(fill="x", pady=(0, 9))
+        obs_url_row.pack(fill="x", pady=(0, 8))
         self.obs_overlay_url_var = tk.StringVar(value=self.obs_overlay_server.url)
         tk.Label(
             obs_url_row,
             textvariable=self.obs_overlay_url_var,
             bg=COLORS["input"],
-            fg=COLORS["cyan"],
-            font=("Consolas", 9, "bold"),
+            fg=COLORS["subtext"],
+            highlightthickness=1,
+            highlightbackground=COLORS["border"],
+            font=("Consolas", 9),
             padx=10,
-            pady=7,
+            pady=6,
             anchor="w",
         ).pack(side="left", fill="x", expand=True, padx=(0, 8))
         self._make_button(
             obs_url_row,
             "Copy URL",
             self._copy_obs_overlay_url,
+            bg=COLORS["card_alt"],
             padx=11,
-            pady=6,
+            pady=5,
             font=("Segoe UI", 8, "bold"),
         ).pack(side="left")
 
@@ -2168,42 +2637,43 @@ class GDQuietApp:
             "Stop OBS Overlay" if self.obs_overlay_server.running else "Enable OBS Overlay",
             self._toggle_obs_overlay,
             bg=COLORS["accent"],
+            hover_bg=COLORS["accent_hover"],
             padx=12,
-            pady=6,
+            pady=5,
             font=("Segoe UI", 8, "bold"),
         )
-        self.obs_overlay_toggle_btn.pack(side="left", padx=(0, 10))
+        self.obs_overlay_toggle_btn.pack(side="left", padx=(0, 8))
         self._make_button(
             obs_controls,
             "Preview Overlay",
             self._open_obs_overlay_preview,
+            bg=COLORS["card_alt"],
             padx=12,
-            pady=6,
+            pady=5,
             font=("Segoe UI", 8, "bold"),
         ).pack(side="left")
-        self.obs_overlay_status_lbl = tk.Label(
-            obs_card,
-            text=self._obs_overlay_status_text(),
-            bg=COLORS["card"],
-            fg=COLORS["green"] if self.obs_overlay_server.running else COLORS["subtext"],
-            font=("Segoe UI", 8),
-            anchor="w",
-        )
-        self.obs_overlay_status_lbl.pack(anchor="w", pady=(8, 0))
 
-        # Card 7: Config & Data
+        # Card 8: Config & data (row 4, col 0..1 span 2)
         c6 = self._make_card(self.settings_body, pady=12)
-        c6.pack(fill="x", pady=(0, 12))
-        tk.Label(c6, text="Config & Data", bg=COLORS["card"], fg=COLORS["cyan"], font=("Segoe UI", 11, "bold")).pack(
-            anchor="w", pady=(0, 6)
+        c6.grid(row=4, column=0, columnspan=2, sticky="nsew", pady=(0, 12))
+        tk.Label(c6, text="Config & data", bg=COLORS["card"], fg=COLORS["text"], font=("Segoe UI", 10, "bold")).pack(
+            anchor="w"
+        )
+        tk.Label(c6, text="Open your settings folder or reset to defaults.", bg=COLORS["card"], fg=COLORS["faint"], font=("Segoe UI", 8)).pack(
+            anchor="w", pady=(1, 8)
         )
         tk.Label(
             c6,
-            text=f"Config file: {config_path()}",
-            bg=COLORS["card"],
-            fg=COLORS["subtext"],
+            text=str(config_path()),
+            bg=COLORS["input"],
+            fg="#8b8b95",
+            highlightthickness=1,
+            highlightbackground=COLORS["border"],
             font=("Consolas", 8),
-        ).pack(anchor="w", pady=(0, 8))
+            padx=10,
+            pady=7,
+            anchor="w",
+        ).pack(fill="x", pady=(0, 10))
         btn_row = tk.Frame(c6, bg=COLORS["card"])
         btn_row.pack(fill="x")
         self._make_button(
@@ -2213,17 +2683,18 @@ class GDQuietApp:
             bg=COLORS["card_alt"],
             padx=12,
             pady=6,
-            font=("Segoe UI", 9, "bold"),
+            font=("Segoe UI", 8, "bold"),
         ).pack(side="left", padx=(0, 8))
         self._make_button(
             btn_row,
             "Reset All Settings to Defaults",
             self._on_reset_defaults,
             bg=COLORS["red_bg"],
+            fg="#fca5a5",
             hover_bg=COLORS["red"],
             padx=12,
             pady=6,
-            font=("Segoe UI", 9, "bold"),
+            font=("Segoe UI", 8, "bold"),
         ).pack(side="left")
 
     # ---- 30-Second Screen Test Logic ----
@@ -3171,6 +3642,13 @@ class GDQuietApp:
 
         action = "Ducks at" if audio_mode == "duck" else "Mutes past"
         self.sidebar_thresh_lbl.configure(text=f"{action} {pct:.0f}%")
+        if hasattr(self, "apps_summary_thresh_lbl"):
+            self.apps_summary_thresh_lbl.configure(text=f"{pct:.0f}%")
+        if hasattr(self, "apps_summary_sub_lbl"):
+            verb = "duck" if audio_mode == "duck" else "mute"
+            self.apps_summary_sub_lbl.configure(
+                text=f"These apps will {verb} after {pct:.0f}%. Their audio returns when the run ends."
+            )
         self.reset_mute_btn.configure(
             text="Restore Audio & Undeafen" if audio_mode == "duck" else "Unmute & Undeafen All"
         )
@@ -3186,6 +3664,17 @@ class GDQuietApp:
                 "Geometry Dash is never affected."
             )
         )
+
+        if hasattr(self, "apps_summary_count_lbl"):
+            noun = "app" if n_apps == 1 else "apps"
+            self.apps_summary_count_lbl.configure(text=f"{n_apps} {noun} selected")
+        if hasattr(self, "apps_summary_sub_lbl"):
+            verb = "duck" if audio_mode == "duck" else "mute"
+            self.apps_summary_sub_lbl.configure(
+                text=f"These apps will {verb} after {pct:.0f}%. Their audio returns when the run ends."
+            )
+        if hasattr(self, "apps_summary_thresh_lbl"):
+            self.apps_summary_thresh_lbl.configure(text=f"{pct:.0f}%")
 
         self.summary_apps_btn.configure(text=f"Apps: {n_apps} selected")
         if auto_deaf and isinstance(hk, dict):
@@ -3231,6 +3720,13 @@ class GDQuietApp:
             audio_mode = str(self.cfg.get("audio_mode", "mute"))
         action = "Ducks at" if audio_mode == "duck" else "Mutes past"
         self.sidebar_thresh_lbl.configure(text=f"{action} {pct:.0f}%")
+        if hasattr(self, "apps_summary_thresh_lbl"):
+            self.apps_summary_thresh_lbl.configure(text=f"{pct:.0f}%")
+        if hasattr(self, "apps_summary_sub_lbl"):
+            verb = "duck" if audio_mode == "duck" else "mute"
+            self.apps_summary_sub_lbl.configure(
+                text=f"These apps will {verb} after {pct:.0f}%. Their audio returns when the run ends."
+            )
 
     def _save_mute_percent(self) -> None:
         try:
@@ -3518,9 +4014,10 @@ class GDQuietApp:
             return
 
         for idx, target in enumerate(targets):
-            row_bg = COLORS["input"] if idx % 2 == 0 else "#111826"
-            row = tk.Frame(self.win_list_frame, bg=row_bg, padx=12, pady=8, cursor="hand2")
+            row_bg = COLORS["card_alt"] if idx % 2 == 0 else COLORS["card2"]
+            row = tk.Frame(self.win_list_frame, bg=row_bg, padx=14, pady=9, cursor="hand2")
             row.pack(fill="x")
+            tk.Frame(self.win_list_frame, bg=COLORS["border"], height=1).pack(fill="x")
 
             var = tk.BooleanVar(value=(target.process_name in selected))
             self.window_vars[target.process_name] = var
@@ -3531,7 +4028,7 @@ class GDQuietApp:
                 command=lambda p=target.process_name, v=var: self._on_app_checkbox_toggle(p, v),
                 bg=row_bg,
                 fg=COLORS["text"],
-                selectcolor=COLORS["card"],
+                selectcolor=COLORS["input"],
                 activebackground=row_bg,
             )
             chk.pack(side="left", padx=(0, 8))
@@ -3553,7 +4050,7 @@ class GDQuietApp:
                 top_line,
                 text=f"  {target.process_name}",
                 bg=row_bg,
-                fg=COLORS["subtext"],
+                fg=COLORS["faint"],
                 font=("Consolas", 8),
             )
             proc_lbl.pack(side="left")
@@ -3568,26 +4065,43 @@ class GDQuietApp:
                 text_col,
                 text=preview,
                 bg=row_bg,
-                fg=COLORS["subtext"],
+                fg="#5f5f6a",
                 font=("Segoe UI", 8),
                 anchor="w",
             )
             sub_lbl.pack(fill="x")
 
+            is_selected = target.process_name in selected
+            action_txt = ("Will duck" if self.cfg.get("audio_mode") == "duck" else "Will mute") if is_selected else "Select"
+            action_bg = COLORS["accent_soft"] if is_selected else COLORS["pill_idle"]
+            action_fg = COLORS["accent_text"] if is_selected else COLORS["subtext"]
+            action_lbl = tk.Label(
+                row,
+                text=action_txt,
+                bg=action_bg,
+                fg=action_fg,
+                font=("Segoe UI", 8, "bold"),
+                padx=9,
+                pady=3,
+                width=10,
+            )
+            action_lbl.pack(side="right", padx=(10, 0))
+
             if target.currently_muted:
-                badge_txt, badge_bg = "Muted", COLORS["red_bg"]
+                badge_txt, badge_bg, badge_fg = "Muted", COLORS["red_bg"], COLORS["red"]
             elif target.has_audio:
-                badge_txt, badge_bg = "Audio active", COLORS["green_bg"]
+                badge_txt, badge_bg, badge_fg = "Audio active", COLORS["green_bg"], COLORS["green_text"]
             else:
-                badge_txt, badge_bg = "Window", COLORS["pill_idle"]
+                badge_txt, badge_bg, badge_fg = "Window only", COLORS["pill_idle"], COLORS["subtext"]
             badge_lbl = tk.Label(
                 row,
                 text=badge_txt,
                 bg=badge_bg,
-                fg=COLORS["text"],
+                fg=badge_fg,
                 font=("Segoe UI", 8, "bold"),
                 padx=9,
                 pady=3,
+                width=13,
             )
             badge_lbl.pack(side="right", padx=(8, 0))
 
@@ -3595,7 +4109,7 @@ class GDQuietApp:
                 v.set(not v.get())
                 self._on_app_checkbox_toggle(p, v)
 
-            for widget in (row, text_col, top_line, name_lbl, proc_lbl, sub_lbl, badge_lbl):
+            for widget in (row, text_col, top_line, name_lbl, proc_lbl, sub_lbl, badge_lbl, action_lbl):
                 widget.bind("<Button-1>", toggle_row)
 
     # ---- Discord Auto-Deafen Page ----
