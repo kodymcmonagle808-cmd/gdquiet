@@ -115,7 +115,7 @@
 
     if (!activeSlider) {
       threshLine.style.bottom = thresh + "%";
-      threshLbl.textContent = `${Math.round(thresh)}% THRESHOLD`;
+      threshLbl.textContent = `${Math.round(thresh)}% threshold`;
     }
 
     const samples = (testData && testData.samples) || [];
@@ -139,9 +139,9 @@
     const flush = () => {
       if (pts.length >= 2) {
         const d = pts.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
-        html += `<polyline fill="none" stroke="#38bdf8" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" points="${d}" />`;
+        html += `<polyline fill="none" stroke="#5b8be4" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" points="${d}" />`;
       } else if (pts.length === 1) {
-        html += `<circle cx="${pts[0][0].toFixed(1)}" cy="${pts[0][1].toFixed(1)}" r="2.5" fill="#38bdf8" />`;
+        html += `<circle cx="${pts[0][0].toFixed(1)}" cy="${pts[0][1].toFixed(1)}" r="2.4" fill="#5b8be4" />`;
       }
       pts = [];
     };
@@ -169,13 +169,14 @@
     const pct = Math.round(Number(cfg.mute_at_percent ?? 50));
 
     $("apps-heading").textContent = audioMode === "duck" ? "Apps to duck" : "Apps to mute";
-    $("apps-lead").textContent =
-      audioMode === "duck" ? "Select the apps to duck during a run." : "Select the apps to mute during a run.";
+    if ($("apps-lead")) {
+      $("apps-lead").textContent = "Geometry Dash is always excluded and will never be muted.";
+    }
     const nSel = selected.size;
     $("apps-sum-count").textContent = `${nSel} ${nSel === 1 ? "app" : "apps"} selected`;
-    $("apps-sum-desc").textContent = `These apps will ${audioMode} after ${pct}%. Their audio returns when the run ends.`;
+    $("apps-sum-desc").textContent = `${audioMode === "duck" ? "Ducked" : "Muted"} past ${pct}% and restored when the attempt ends.`;
     $("apps-sum-thresh").textContent = `${pct}%`;
-    $("apps-sum-label").textContent = audioMode === "duck" ? "DUCK THRESHOLD" : "MUTE THRESHOLD";
+    $("apps-sum-label").textContent = "Threshold";
     if (document.activeElement !== $("apps-bg-check")) {
       $("apps-bg-check").checked = Boolean(cfg.show_background_audio);
     }
@@ -237,8 +238,10 @@
             <div class="app-cell">
               <span class="tile ${meta.cls}">${meta.svg}</span>
               <div style="min-width:0">
-                <div class="app-name">${escapeHtml(t.display_name)}</div>
-                <div class="app-exe">${escapeHtml(t.process_name)}</div>
+                <div class="app-title-line">
+                  <span class="app-name">${escapeHtml(t.display_name)}</span>
+                  <span class="app-exe">${escapeHtml(t.process_name)}</span>
+                </div>
                 <div class="app-win">${escapeHtml(winTxt)}</div>
               </div>
             </div>
@@ -267,14 +270,14 @@
         box.style.width = w + "%";
         box.style.top = y + "%";
         box.style.height = h + "%";
-        lbl.textContent = (reg.preset || "CUSTOM REGION").toUpperCase();
+        lbl.textContent = reg.preset || "Custom region";
       } else {
         box.style.left = "20%";
         box.style.right = "20%";
         box.style.width = "auto";
         box.style.top = "18%";
         box.style.height = "18%";
-        lbl.textContent = "CUSTOM SCREEN";
+        lbl.textContent = "Custom screen";
       }
     } else {
       box.style.left = "24%";
@@ -282,7 +285,7 @@
       box.style.width = "auto";
       box.style.top = "8%";
       box.style.height = "15%";
-      lbl.textContent = "AUTO · TOP 10%";
+      lbl.textContent = "Auto · Top 10%";
     }
   }
 
@@ -306,15 +309,13 @@
     const wHead = $("watcher-head");
     const wantHeadCls = "watcher-head " + (status.code || "watching");
     if (wHead.className !== wantHeadCls) wHead.className = wantHeadCls;
-    $("watcher-state-txt").textContent = status.headline || "WATCHING";
+    const rawHead = status.headline || "Watching";
+    $("watcher-state-txt").textContent = rawHead.charAt(0).toUpperCase() + rawHead.slice(1).toLowerCase();
     $("watcher-pct").textContent =
       reading.percent !== null && reading.percent !== undefined ? `${reading.percent.toFixed(1)} %` : "-- %";
     $("watcher-sub").textContent = status.sub || "Waiting for a run";
 
-    setSliderFill($("sidebar-threshold"), threshold);
-    if (activeSlider !== $("sidebar-threshold")) {
-      $("watcher-thresh").textContent = `${audioMode === "duck" ? "Ducks at" : "Mutes past"} ${threshold}%`;
-    }
+    $("watcher-thresh").textContent = `${audioMode === "duck" ? "Ducks at" : "Mutes past"} ${threshold}%`;
 
     $("sidebar-watch-txt").textContent = cfg.watch_enabled ? "Pause watching" : "Resume watching";
     const whk = cfg.watch_toggle_hotkey;
@@ -670,8 +671,8 @@
 
   function stopRecording(restore) {
     recordingTarget = null;
-    $("ov-record-hk").textContent = "Record hotkey";
-    $("deafen-record-btn").textContent = "Record hotkey";
+    $("ov-record-hk").textContent = "Record";
+    $("deafen-record-btn").textContent = "Record";
     if (restore && latestState) applyState(latestState);
   }
 
@@ -697,7 +698,8 @@
     window.addEventListener("mouseup", releaseSlider);
     window.addEventListener("touchend", releaseSlider);
 
-    [$("sidebar-threshold"), $("ov-threshold")].forEach((slider) => {
+    [$("ov-threshold")].forEach((slider) => {
+      if (!slider) return;
       const startDrag = () => {
         activeSlider = slider;
       };
@@ -707,23 +709,6 @@
     });
 
     // Sidebar controls
-    $("sidebar-threshold").addEventListener("input", (e) => {
-      const val = e.target.value;
-      e.target.style.setProperty("--fill", val + "%");
-      setSliderFill($("ov-threshold"), val);
-      $("ov-pct-input").value = val;
-      $("watcher-thresh").textContent = `${
-        latestState && latestState.cfg && latestState.cfg.audio_mode === "duck" ? "Ducks at" : "Mutes past"
-      } ${val}%`;
-      $("test-thresh-line").style.bottom = val + "%";
-      $("test-thresh-lbl").textContent = `${val}% THRESHOLD`;
-    });
-    $("sidebar-threshold").addEventListener("change", async (e) => {
-      activeSlider = null;
-      await mutate((a) => a.set_threshold(Number(e.target.value)));
-      flashSaved();
-    });
-
     $("sidebar-watch-btn").addEventListener("click", async () => {
       await mutate((a) => a.toggle_watching());
       flashSaved();
@@ -767,13 +752,12 @@
     $("ov-threshold").addEventListener("input", (e) => {
       const val = e.target.value;
       e.target.style.setProperty("--fill", val + "%");
-      setSliderFill($("sidebar-threshold"), val);
       $("ov-pct-input").value = val;
       $("watcher-thresh").textContent = `${
         latestState && latestState.cfg && latestState.cfg.audio_mode === "duck" ? "Ducks at" : "Mutes past"
       } ${val}%`;
       $("test-thresh-line").style.bottom = val + "%";
-      $("test-thresh-lbl").textContent = `${val}% THRESHOLD`;
+      $("test-thresh-lbl").textContent = `${val}% threshold`;
     });
     $("ov-threshold").addEventListener("change", async (e) => {
       activeSlider = null;
@@ -989,17 +973,17 @@
       const btn = $("reset-defaults-btn");
       if (!resetArmed) {
         resetArmed = true;
-        btn.textContent = "Click again to confirm reset";
+        btn.textContent = "Confirm reset?";
         clearTimeout(resetTimer);
         resetTimer = setTimeout(() => {
           resetArmed = false;
-          btn.textContent = "Reset all settings to defaults";
+          btn.textContent = "Reset to defaults";
         }, 4000);
         return;
       }
       resetArmed = false;
       clearTimeout(resetTimer);
-      btn.textContent = "Reset all settings to defaults";
+      btn.textContent = "Reset to defaults";
       await mutate((a) => a.reset_defaults());
       flashSaved();
     });
