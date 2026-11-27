@@ -519,8 +519,9 @@ class GDQuietTests(unittest.TestCase):
         # Smooth ramp across threshold mutes immediately
         self.assertEqual(deb.update(45.0, 50.0, True, now=1.0), (False, True))
         self.assertEqual(deb.update(50.2, 50.0, True, now=1.1), (True, True))
-        # Dropping below threshold unmutes immediately
-        self.assertEqual(deb.update(0.0, 50.0, True, now=1.2), (False, True))
+        # 0% death also needs 2 consecutive frames (avoids 1-frame OCR glitch)
+        self.assertEqual(deb.update(0.0, 50.0, True, now=1.2), (True, True))
+        self.assertEqual(deb.update(0.0, 50.0, True, now=1.25), (False, True))
         # Sudden jump from 0 -> 88 requires 2 consecutive frames to ignore 1-frame OCR glitch
         self.assertEqual(deb.update(88.0, 50.0, True, now=1.3), (False, True))
         self.assertEqual(deb.update(12.0, 50.0, True, now=1.4), (False, True))
@@ -650,7 +651,8 @@ class GDQuietTests(unittest.TestCase):
         deb = screen_reader.PercentStateDebouncer()
         self.assertEqual(deb.update(48.0, 50.0, True, now=1.0), (False, True))
         self.assertEqual(deb.update(55.0, 50.0, True, now=1.1), (True, True))
-        self.assertEqual(deb.update(0.0, 50.0, True, now=1.2), (False, True))
+        self.assertEqual(deb.update(0.0, 50.0, True, now=1.2), (True, True))
+        self.assertEqual(deb.update(0.0, 50.0, True, now=1.25), (False, True))
 
         self.assertEqual(deb.update(49.0, 50.0, True, now=2.0), (False, True))
         self.assertEqual(deb.update(64.0, 50.0, True, now=2.1), (True, True))

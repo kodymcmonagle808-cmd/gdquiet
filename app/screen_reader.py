@@ -503,8 +503,8 @@ class PercentStateDebouncer:
         if percent < threshold:
             self._high_streak = 0
             self._low_streak += 1
-            # Unmute right away at 0% death respawn; require 2 frames otherwise to ignore 1-frame OCR dips.
-            if not self.is_muted or percent <= 0.5 or self._low_streak >= 2:
+            # Require 2 consecutive below-threshold frames to unmute (avoids 1-frame OCR glitches including false 0%).
+            if not self.is_muted or self._low_streak >= 2:
                 self.is_muted = False
             return self.is_muted, True
 
