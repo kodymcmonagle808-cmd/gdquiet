@@ -14,7 +14,7 @@ from functools import cmp_to_key
 from pathlib import Path
 from typing import Callable
 
-APP_VERSION = "4.4.3"
+APP_VERSION = "4.4.4-beta.1"
 PATCH_NOTES = """\
 - Muting is now instant (1 frame) when percent crosses above your threshold
 - Unmuting still requires 2 consecutive below-threshold frames (prevents false unmutes)
