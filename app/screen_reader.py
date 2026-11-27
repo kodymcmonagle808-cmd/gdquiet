@@ -483,12 +483,18 @@ class PercentStateDebouncer:
 
         if percent is None:
             self._low_streak = 0
-            if self.last_seen_at > 0 and (ts - self.last_seen_at) >= self.missing_timeout_s:
-                self.is_muted = False
-                self.last_percent = None
-                self._high_streak = 0
-                return False, False
-            return self.is_muted, (self.last_seen_at > 0 and (ts - self.last_seen_at) < self.missing_timeout_s)
+            if self.last_seen_at > 0:
+                gap = ts - self.last_seen_at
+                # Hold mute for at least 1s when already muted to ride out brief OCR gaps
+                # without false-unmuting.  When not muted, use the shorter configured timeout.
+                effective_timeout = max(self.missing_timeout_s, 1.0) if self.is_muted else self.missing_timeout_s
+                if gap >= effective_timeout:
+                    self.is_muted = False
+                    self.last_percent = None
+                    self._high_streak = 0
+                    return False, False
+                return self.is_muted, True
+            return False, False
 
         self.last_seen_at = ts
         prev = self.last_percent

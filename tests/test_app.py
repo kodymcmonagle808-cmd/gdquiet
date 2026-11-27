@@ -534,7 +534,7 @@ class GDQuietTests(unittest.TestCase):
         self.assertEqual(deb.update(62.0, 50.0, True, now=2.0), (False, True))
         self.assertEqual(deb.update(63.0, 50.0, True, now=2.1), (True, True))
         self.assertEqual(deb.update(None, 50.0, True, now=2.2), (True, True))
-        self.assertEqual(deb.update(None, 50.0, True, now=2.8), (False, False))
+        self.assertEqual(deb.update(None, 50.0, True, now=3.2), (False, False))
 
     def test_percent_debouncer_keeps_threshold_confirmation_across_brief_ocr_gap(self) -> None:
         deb = screen_reader.PercentStateDebouncer(missing_timeout_s=0.6)
@@ -548,7 +548,7 @@ class GDQuietTests(unittest.TestCase):
         self.assertEqual(deb.update(20.0, 50.0, True, now=1.0), (False, True))
         self.assertEqual(deb.update(51.0, 50.0, True, now=1.1), (False, True))
         self.assertEqual(deb.update(52.0, 50.0, True, now=1.2), (True, True))
-        self.assertEqual(deb.update(None, 50.0, True, now=1.8), (False, False))
+        self.assertEqual(deb.update(None, 50.0, True, now=2.3), (False, False))
 
     def test_screen_test_session_records_milestones_and_finishes(self) -> None:
         sess = screen_reader.ScreenTestSession(duration_s=30.0)
@@ -657,7 +657,7 @@ class GDQuietTests(unittest.TestCase):
         self.assertEqual(deb.update(49.0, 50.0, True, now=2.0), (False, True))
         self.assertEqual(deb.update(64.0, 50.0, True, now=2.1), (True, True))
         self.assertEqual(deb.update(None, 50.0, True, now=2.2), (True, True))
-        self.assertEqual(deb.update(None, 50.0, True, now=2.6), (False, False))
+        self.assertEqual(deb.update(None, 50.0, True, now=3.2), (False, False))
 
         # 2. DiscordDeafenController enforces cooldown before toggling back to undeafen
         press_times: list[float] = []
