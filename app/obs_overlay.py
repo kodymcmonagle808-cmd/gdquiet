@@ -15,51 +15,74 @@ OVERLAY_HTML = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>GD Quiet OBS Overlay</title>
 <style>
-:root{color-scheme:dark;font-family:Inter,"Segoe UI",sans-serif}
+:root{
+  color-scheme:dark;
+  --bg:#1e1f22;
+  --bar:#18191c;
+  --sunken:#141518;
+  --ctrl:#2e3037;
+  --ctrl-hover:#373a42;
+  --line:#31333a;
+  --line2:#3e414a;
+  --ink:#eceef2;
+  --muted:#a1a6b3;
+  --faint:#757a87;
+  --accent:#4c7dd9;
+  --accent-hover:#5b8be4;
+  --green:#4ea864;
+  --amber:#d4a23b;
+  --red:#d95b57;
+  --mono:"Cascadia Mono",Consolas,ui-monospace,monospace;
+  font-family:"Segoe UI Variable","Segoe UI",system-ui,sans-serif;
+}
 *{box-sizing:border-box}
-body{margin:0;padding:16px;background:transparent;color:#f1f5f9}
-.panel{max-width:520px;padding:18px;border:1px solid #293a56;border-radius:16px;
-background:linear-gradient(145deg,rgba(21,31,51,.97),rgba(12,20,36,.97));
-box-shadow:0 12px 36px rgba(0,0,0,.32)}
-.top{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.brand{font-size:12px;font-weight:800;letter-spacing:.11em;color:#a0aec0}
-.state{display:flex;align-items:center;gap:7px;padding:6px 10px;border-radius:999px;
-background:#163b2b;color:#86efac;font-size:12px;font-weight:800}
-.dot{width:8px;height:8px;border-radius:50%;background:currentColor}
-.state.muted{background:#461f2a;color:#fca5a5}
-.state.paused{background:#25324a;color:#cbd5e1}
-.reading{display:flex;align-items:baseline;gap:8px;margin:18px 0 12px}
-.percent{font-size:48px;line-height:1;font-weight:800;letter-spacing:-.06em}
-.reading-label{font-size:12px;color:#a0aec0}
-.meter{height:7px;border-radius:8px;background:#0c1424;overflow:hidden}
-.fill{height:100%;width:0;background:linear-gradient(90deg,#38bdf8,#818cf8);transition:width .2s}
-.details{display:flex;justify-content:space-between;gap:10px;margin-top:13px;font-size:12px;color:#a0aec0}
-.details strong{color:#f1f5f9}
-.controls{display:flex;align-items:center;gap:12px;margin-top:18px;padding-top:14px;border-top:1px solid #293a56}
-button{border:0;border-radius:9px;padding:9px 12px;background:#293a56;color:#f1f5f9;
-font:inherit;font-size:12px;font-weight:700;cursor:pointer}
-button:hover{background:#3a4d6c}
-button.primary{background:#6d78e8}
-button.primary:hover{background:#818cf8}
-.threshold{flex:1;min-width:100px;accent-color:#38bdf8}
-.threshold-label{white-space:nowrap;font-size:12px;color:#a0aec0}
-.error{display:none;margin-top:10px;color:#fca5a5;font-size:11px}
+body{margin:0;padding:12px;background:transparent;color:var(--ink)}
+.panel{max-width:520px;background:var(--bg);border:1px solid var(--line2);border-radius:2px;overflow:hidden}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 12px;background:var(--bar);border-bottom:1px solid var(--line)}
+.brand{font-size:11.5px;font-weight:600;letter-spacing:.04em;color:var(--muted)}
+.state{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:var(--green)}
+.dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+.state.muted{color:var(--red)}
+.state.paused{color:var(--amber)}
+.body{padding:14px 14px 12px}
+.reading{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:10px}
+.percent{font-family:var(--mono);font-size:40px;line-height:1;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ink)}
+.reading-label{font-size:12px;color:var(--faint)}
+.meter{position:relative;height:6px;border-radius:1px;background:var(--sunken);border:1px solid var(--line);overflow:hidden}
+.fill{height:100%;width:0;background:var(--accent);transition:width .16s linear}
+.panel.is-muted .fill{background:var(--red)}
+.details{display:flex;justify-content:space-between;gap:10px;margin-top:9px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.details strong{color:var(--ink);font-weight:600}
+.controls{display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--bar);border-top:1px solid var(--line)}
+button{border:1px solid var(--line2);border-radius:2px;height:26px;padding:0 10px;background:var(--ctrl);color:var(--ink);
+font:inherit;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap}
+button:hover{background:var(--ctrl-hover)}
+button.primary{background:var(--accent);border-color:rgba(255,255,255,.08);color:#fff}
+button.primary:hover{background:var(--accent-hover)}
+.threshold-label{white-space:nowrap;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.threshold-label strong{color:var(--ink);font-weight:600}
+.threshold{-webkit-appearance:none;appearance:none;flex:1;min-width:90px;height:16px;background:transparent;cursor:pointer}
+.threshold::-webkit-slider-runnable-track{height:3px;border-radius:1px;background:var(--line2)}
+.threshold::-webkit-slider-thumb{-webkit-appearance:none;width:9px;height:14px;border-radius:2px;background:#eceef2;border:1px solid var(--line2);margin-top:-5.5px}
+.error{display:none;padding:7px 12px;border-top:1px solid var(--line);background:#2b1b1c;color:#efb0ae;font-size:11.5px}
 </style>
 </head>
 <body>
-<main class="panel">
+<main id="panel" class="panel">
   <div class="top">
-    <div class="brand">GD QUIET <span style="color:#38bdf8">/</span> LIVE</div>
+    <div class="brand">GD QUIET</div>
     <div id="state" class="state"><span class="dot"></span><span id="state-text">Connecting</span></div>
   </div>
-  <div class="reading">
-    <div id="percent" class="percent">--%</div>
-    <div class="reading-label">Geometry Dash progress</div>
-  </div>
-  <div class="meter"><div id="fill" class="fill"></div></div>
-  <div class="details">
-    <span>Threshold <strong id="threshold-text">--%</strong></span>
-    <span id="watch-text">Connecting…</span>
+  <div class="body">
+    <div class="reading">
+      <div id="percent" class="percent">--%</div>
+      <div class="reading-label">Geometry Dash progress</div>
+    </div>
+    <div class="meter"><div id="fill" class="fill"></div></div>
+    <div class="details">
+      <span>Threshold: <strong id="threshold-text">--%</strong></span>
+      <span id="watch-text">Connecting...</span>
+    </div>
   </div>
   <div class="controls">
     <button id="watch-button" class="primary" type="button">Pause watching</button>
@@ -81,6 +104,7 @@ async function refresh(){
     watching=Boolean(data.watching);
     threshold=Number(data.threshold)||0;
     const pct=Number.isFinite(data.percent)?Math.max(0,Math.min(100,data.percent)):null;
+    byId('panel').classList.toggle('is-muted',Boolean(data.muted));
     byId('percent').textContent=pct===null?'--%':`${pct.toFixed(1)}%`;
     byId('fill').style.width=pct===null?'0%':`${pct}%`;
     byId('threshold-text').textContent=`${threshold.toFixed(0)}%`;
@@ -92,13 +116,13 @@ async function refresh(){
     byId('watch-text').textContent=data.testing?'Screen test running':(watching?'Watching %':'Watching paused');
     const state=byId('state');
     state.className='state'+(data.muted?' muted':(!watching?' paused':''));
-    byId('state-text').textContent=data.muted?'MUTED':(!watching?'PAUSED':'CLEAR');
+    byId('state-text').textContent=data.muted?'Muted':(!watching?'Paused':'Clear');
     byId('error').style.display='none';
   }catch(error){
     byId('error').textContent='GD Quiet is not responding. Check that the OBS overlay is enabled in the app.';
     byId('error').style.display='block';
     byId('state').className='state paused';
-    byId('state-text').textContent='OFFLINE';
+    byId('state-text').textContent='Offline';
   }
 }
 async function control(payload){
