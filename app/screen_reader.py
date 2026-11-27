@@ -33,8 +33,8 @@ SM_CYVIRTUALSCREEN = 79
 WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
 
 # Maps white-ish HUD score (0..255) to dark ink (0..255, inverted for OCR).
-# Threshold at 90 to catch subtly tinted or off-white HUD text.
-_WHITE_LUT = [255 if v < 90 else max(0, 255 - int((v - 90) * 1.8)) for v in range(256)]
+# Threshold at 110 to catch subtly tinted or off-white HUD text.
+_WHITE_LUT = [255 if v < 110 else max(0, 255 - int((v - 110) * 2.2)) for v in range(256)]
 _LUMA_LUT = [255 if v < 165 else max(0, 255 - int((v - 165) * 2.8)) for v in range(256)]
 _DARK_INK_MASK = [255 if v < 245 else 0 for v in range(256)]
 
@@ -712,6 +712,8 @@ class ScreenPercentWatcher:
                 prefer_luma = False
                 last_target_key: tuple[str, str] | None = None
                 consecutive_missed_reads = 0
+                last_good_rect: dict[str, int] | None = None
+                last_good_rect_at = 0.0
 
                 while not self._stop.is_set():
                     cfg = self._get_settings()
@@ -733,6 +735,7 @@ class ScreenPercentWatcher:
 
                     if not enabled:
                         last_x_frac = None
+                        last_good_rect = None
                         self._debouncer.reset()
                         self._level_name_tracker.reset()
                         self._on_reading(
@@ -749,6 +752,7 @@ class ScreenPercentWatcher:
                         continue
 
                     if not ocr.available():
+                        last_good_rect = None
                         self._debouncer.reset()
                         self._level_name_tracker.reset()
                         self._on_reading(
@@ -771,27 +775,37 @@ class ScreenPercentWatcher:
                     )
 
                     if rect is None:
-                        last_x_frac = None
-                        self._debouncer.reset()
-                        self._level_name_tracker.reset()
-                        self._on_reading(
-                            ScreenReading(
-                                percent=None,
-                                raw_text="",
-                                should_mute=False,
-                                is_playing=False,
-                                status_text=source_label,
-                                preview_image=None,
+                        # Grace period: reuse the last known rect briefly to avoid
+                        # flickering when window lookup hiccups for a frame or two.
+                        now_grace = time.monotonic()
+                        if last_good_rect is not None and (now_grace - last_good_rect_at) < 2.0:
+                            rect = last_good_rect
+                        else:
+                            last_good_rect = None
+                            last_x_frac = None
+                            self._debouncer.reset()
+                            self._level_name_tracker.reset()
+                            self._on_reading(
+                                ScreenReading(
+                                    percent=None,
+                                    raw_text="",
+                                    should_mute=False,
+                                    is_playing=False,
+                                    status_text=source_label,
+                                    preview_image=None,
+                                )
                             )
-                        )
-                        self._stop.wait(0.5)
-                        continue
+                            self._stop.wait(0.5)
+                            continue
 
                     frame_t0 = time.perf_counter()
                     try:
                         shot = sct.grab(rect)
                         img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+                        last_good_rect = dict(rect)
+                        last_good_rect_at = time.monotonic()
                     except Exception as exc:
+                        last_good_rect = None
                         self._debouncer.reset()
                         self._on_reading(
                             ScreenReading(

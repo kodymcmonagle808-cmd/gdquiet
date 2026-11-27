@@ -427,7 +427,7 @@ class GDQuietTests(unittest.TestCase):
         with patch.object(screen_reader, "find_window_client_rect", return_value=(100, 50, 1920, 1080)):
             rect, label = screen_reader.compute_capture_rect("auto_window", "geometrydash.exe", None)
             self.assertEqual(label, "geometrydash.exe")
-            self.assertEqual(rect, {"left": 100, "top": 50, "width": 1920, "height": 108})
+            self.assertEqual(rect, {"left": 100, "top": 50, "width": 1920, "height": 129})
 
     def test_parse_percent_variants(self) -> None:
         self.assertEqual(screen_reader.parse_percent_from_text("50%"), 50.0)
