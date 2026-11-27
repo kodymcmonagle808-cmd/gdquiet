@@ -981,7 +981,7 @@ class GDQuietWebApp:
         if self._active_level_key:
             with self.cfg_lock:
                 profiles = dict(self.cfg.get("level_profiles") or {})
-                profiles[self._active_level_key] = build_level_profile(self.cfg, level_name=self._active_level_name)
+                profiles[self._active_level_key] = build_level_profile(self._active_level_name, self.cfg)
                 self.cfg["level_profiles"] = profiles
             self._save_cfg()
             self._footer_message = f"Saved profile for {self._active_level_name}."
@@ -1021,9 +1021,9 @@ class GDQuietWebApp:
             profiles = dict(self.cfg.get("level_profiles") or {})
             profile = profiles.get(key)
             if isinstance(profile, dict):
-                apply_level_profile(self.cfg, profile)
+                self.cfg.update(apply_level_profile(self.cfg, profile))
             else:
-                profiles[key] = build_level_profile(self.cfg, level_name=level_name)
+                profiles[key] = build_level_profile(level_name, self.cfg)
                 self.cfg["level_profiles"] = profiles
         self._active_level_name = level_name
         self._active_level_key = key
@@ -1219,10 +1219,11 @@ class GDQuietWebApp:
     def _queue_obs_overlay_control(self, payload: dict[str, Any]) -> bool:
         if self._closing:
             return False
-        if "watch_enabled" in payload:
-            self.set_setting("watch_enabled", bool(payload["watch_enabled"]))
-        if "mute_at_percent" in payload:
-            self.set_threshold(float(payload["mute_at_percent"]))
+        action = payload.get("action")
+        if action == "watch":
+            self.set_setting("watch_enabled", bool(payload.get("enabled", True)))
+        elif action == "threshold":
+            self.set_threshold(float(payload.get("value", 50.0)))
         return True
 
     def _start_obs_overlay(self, persist: bool = True) -> bool:

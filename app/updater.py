@@ -14,7 +14,7 @@ from functools import cmp_to_key
 from pathlib import Path
 from typing import Callable
 
-APP_VERSION = "4.3.7"
+APP_VERSION = "4.3.8"
 GITHUB_REPO = "kodymcmonagle808-cmd/gdquiet"
 RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 RELEASES_LIST_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"

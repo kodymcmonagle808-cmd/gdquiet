@@ -220,11 +220,11 @@ def compute_capture_rect(
         return None, f"Waiting for {proc} window..."
 
     wx, wy, ww, wh = rect
-    # Scan only the top 10% of the game window.
+    # Scan the top 12% of the game window (wider than 10% to avoid clipping large % text).
     left = wx
     top = wy
     width = max(80, ww)
-    height = max(24, int(wh * 0.10))
+    height = max(24, int(wh * 0.12))
     return {"left": left, "top": top, "width": width, "height": height}, proc
 
 
@@ -255,7 +255,8 @@ def _prepare_ocr_gray(
 
     x0, y0, x1, y1 = bbox
     # Pad around the foreground ink so short strings like "8%" keep line context.
-    cropped = ink.crop((max(0, x0 - 40), max(0, y0 - 20), min(ink.width, x1 + 40), min(ink.height, y1 + 20)))
+    # Use generous left padding (80px) to avoid clipping leading digits (e.g. "26%" -> "6%").
+    cropped = ink.crop((max(0, x0 - 80), max(0, y0 - 20), min(ink.width, x1 + 60), min(ink.height, y1 + 20)))
     scale = 3 if cropped.height < 80 else (2 if cropped.height < 150 else 1)
     if scale > 1:
         cropped = cropped.resize((cropped.width * scale, cropped.height * scale), Image.Resampling.BILINEAR)
@@ -647,7 +648,7 @@ class ScreenPercentWatcher:
     ) -> tuple[float | None, str, float | None, bool]:
         last_pct = self._debouncer.last_percent
         if auto_roi and img.width >= 700:
-            band_w = max(420, int(img.width * 0.42))
+            band_w = max(480, int(img.width * 0.48))
             center_frac = 0.50 if last_x_frac is None else last_x_frac
             x0 = max(0, min(img.width - band_w, int(center_frac * img.width) - (band_w // 2)))
             x1 = min(img.width, x0 + band_w)
