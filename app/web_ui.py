@@ -3,6 +3,7 @@ from __future__ import annotations
 import atexit
 import base64
 import ctypes
+from ctypes import wintypes
 import io
 import os
 from pathlib import Path
@@ -14,6 +15,7 @@ from typing import Any
 import webbrowser
 
 from PIL import Image
+import psutil
 import webview
 
 from config import DEFAULT_CONFIG, app_data_dir, config_path, load_config, save_config
@@ -68,6 +70,139 @@ _NUMERIC_BOUNDS: dict[str, tuple[float, float, bool]] = {
     "test_duration_s": (5.0, 120.0, True),
     "discord_cooldown_ms": (0.0, 2000.0, True),
 }
+
+
+class _ICONINFO(ctypes.Structure):
+    _fields_ = [
+        ("fIcon", wintypes.BOOL),
+        ("xHotspot", wintypes.DWORD),
+        ("yHotspot", wintypes.DWORD),
+        ("hbmMask", wintypes.HBITMAP),
+        ("hbmColor", wintypes.HBITMAP),
+    ]
+
+
+class _BITMAP(ctypes.Structure):
+    _fields_ = [
+        ("bmType", wintypes.LONG),
+        ("bmWidth", wintypes.LONG),
+        ("bmHeight", wintypes.LONG),
+        ("bmWidthBytes", wintypes.LONG),
+        ("bmPlanes", wintypes.WORD),
+        ("bmBitsPixel", wintypes.WORD),
+        ("bmBits", ctypes.c_void_p),
+    ]
+
+
+class _BITMAPINFOHEADER(ctypes.Structure):
+    _fields_ = [
+        ("biSize", wintypes.DWORD),
+        ("biWidth", wintypes.LONG),
+        ("biHeight", wintypes.LONG),
+        ("biPlanes", wintypes.WORD),
+        ("biBitCount", wintypes.WORD),
+        ("biCompression", wintypes.DWORD),
+        ("biSizeImage", wintypes.DWORD),
+        ("biXPelsPerMeter", wintypes.LONG),
+        ("biYPelsPerMeter", wintypes.LONG),
+        ("biClrUsed", wintypes.DWORD),
+        ("biClrImportant", wintypes.DWORD),
+    ]
+
+
+def _setup_icon_win32() -> tuple[Any, Any, Any] | None:
+    try:
+        shell32 = ctypes.windll.shell32
+        user32 = ctypes.windll.user32
+        gdi32 = ctypes.windll.gdi32
+        shell32.ExtractIconExW.argtypes = [
+            wintypes.LPCWSTR,
+            ctypes.c_int,
+            ctypes.POINTER(wintypes.HICON),
+            ctypes.POINTER(wintypes.HICON),
+            wintypes.UINT,
+        ]
+        shell32.ExtractIconExW.restype = wintypes.UINT
+        user32.GetIconInfo.argtypes = [wintypes.HICON, ctypes.POINTER(_ICONINFO)]
+        user32.GetIconInfo.restype = wintypes.BOOL
+        user32.DestroyIcon.argtypes = [wintypes.HICON]
+        user32.DestroyIcon.restype = wintypes.BOOL
+        user32.GetDC.argtypes = [wintypes.HWND]
+        user32.GetDC.restype = wintypes.HDC
+        user32.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
+        user32.ReleaseDC.restype = ctypes.c_int
+        gdi32.GetObjectW.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p]
+        gdi32.GetObjectW.restype = ctypes.c_int
+        gdi32.GetDIBits.argtypes = [
+            wintypes.HDC,
+            wintypes.HBITMAP,
+            wintypes.UINT,
+            wintypes.UINT,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            wintypes.UINT,
+        ]
+        gdi32.GetDIBits.restype = ctypes.c_int
+        gdi32.DeleteObject.argtypes = [wintypes.HANDLE]
+        gdi32.DeleteObject.restype = wintypes.BOOL
+        return shell32, user32, gdi32
+    except Exception:
+        return None
+
+
+_ICON_WIN32 = _setup_icon_win32()
+
+
+def _extract_exe_icon_png(exe_path: str) -> str | None:
+    if _ICON_WIN32 is None or not exe_path or not os.path.isfile(exe_path):
+        return None
+    shell32, user32, gdi32 = _ICON_WIN32
+    large = wintypes.HICON()
+    count = shell32.ExtractIconExW(exe_path, 0, ctypes.byref(large), None, 1)
+    if count == 0 or not large.value:
+        return None
+    hicon = large.value
+    try:
+        ii = _ICONINFO()
+        if not user32.GetIconInfo(hicon, ctypes.byref(ii)):
+            return None
+        try:
+            hbmp = ii.hbmColor or ii.hbmMask
+            bm = _BITMAP()
+            if not gdi32.GetObjectW(hbmp, ctypes.sizeof(bm), ctypes.byref(bm)):
+                return None
+            w, h = int(bm.bmWidth), int(bm.bmHeight)
+            if w <= 0 or h <= 0:
+                return None
+            bmi = _BITMAPINFOHEADER()
+            bmi.biSize = ctypes.sizeof(_BITMAPINFOHEADER)
+            bmi.biWidth = w
+            bmi.biHeight = -h
+            bmi.biPlanes = 1
+            bmi.biBitCount = 32
+            bmi.biCompression = 0
+            buf = (ctypes.c_ubyte * (w * h * 4))()
+            hdc = user32.GetDC(None)
+            try:
+                rows = gdi32.GetDIBits(hdc, hbmp, 0, h, buf, ctypes.byref(bmi), 0)
+            finally:
+                user32.ReleaseDC(None, hdc)
+            if not rows:
+                return None
+            img = Image.frombuffer("RGBA", (w, h), bytes(buf), "raw", "BGRA", 0, 1)
+            img = img.resize((32, 32), Image.Resampling.LANCZOS)
+            out = io.BytesIO()
+            img.save(out, format="PNG")
+            return "data:image/png;base64," + base64.b64encode(out.getvalue()).decode("ascii")
+        finally:
+            if ii.hbmColor:
+                gdi32.DeleteObject(ii.hbmColor)
+            if ii.hbmMask:
+                gdi32.DeleteObject(ii.hbmMask)
+    except Exception:
+        return None
+    finally:
+        user32.DestroyIcon(hicon)
 
 
 class GDQuietWebApp:
@@ -125,7 +260,8 @@ class GDQuietWebApp:
         self._force_exit = False
         self._last_audio_enforce_at = 0.0
         self._all_targets: list[MuteTarget] = []
-        self._open_processes: list[str] = []
+        self._open_processes: list[dict[str, str]] = []
+        self._icon_cache: dict[str, str | None] = {}
         self._latest_reading: ScreenReading | None = None
         self._cached_preview_reading_id: int | None = None
         self._cached_preview_url: str | None = None
@@ -452,6 +588,7 @@ class GDQuietWebApp:
                     "window_titles": list(t.window_titles),
                     "has_audio": t.has_audio,
                     "currently_muted": t.currently_muted,
+                    "icon_data_url": self._icon_cache.get(t.process_name.lower()),
                 }
                 for t in self._all_targets
             ],
@@ -620,7 +757,23 @@ class GDQuietWebApp:
     def _refresh_windows(self) -> None:
         with self.cfg_lock:
             include_bg = bool(self.cfg.get("show_background_audio", False))
-        self._all_targets = list_mute_targets(include_background_audio=include_bg)
+        targets = list_mute_targets(include_background_audio=include_bg)
+        missing = {t.process_name.lower() for t in targets if t.process_name.lower() not in self._icon_cache}
+        if missing:
+            exe_by_proc: dict[str, str] = {}
+            try:
+                for proc in psutil.process_iter(["name", "exe"]):
+                    pname = str(proc.info.get("name") or "").lower()
+                    if pname in missing and pname not in exe_by_proc:
+                        exe_path = proc.info.get("exe")
+                        if exe_path:
+                            exe_by_proc[pname] = str(exe_path)
+            except Exception:
+                pass
+            for pname in missing:
+                exe_path = exe_by_proc.get(pname, "")
+                self._icon_cache[pname] = _extract_exe_icon_png(exe_path) if exe_path else None
+        self._all_targets = targets
 
     def refresh_windows(self) -> dict[str, Any]:
         self._refresh_windows()
@@ -661,12 +814,24 @@ class GDQuietWebApp:
     # ---- Capture & Region ----
 
     def _refresh_target_windows(self) -> None:
-        procs = list_open_window_processes()
+        raw = list_open_window_processes()
+        normalized: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for item in raw:
+            if isinstance(item, (tuple, list)) and len(item) >= 2:
+                val = str(item[0]).strip().lower()
+                lbl = str(item[1]).strip() or val
+            else:
+                val = str(item).strip().lower()
+                lbl = val
+            if val and val not in seen:
+                seen.add(val)
+                normalized.append({"value": val, "label": lbl})
         with self.cfg_lock:
             cur = str(self.cfg.get("target_process") or "geometrydash.exe").lower()
-        if cur and cur not in procs:
-            procs.insert(0, cur)
-        self._open_processes = procs
+        if cur and cur not in seen:
+            normalized.insert(0, {"value": cur, "label": cur})
+        self._open_processes = normalized
 
     def refresh_target_windows(self) -> dict[str, Any]:
         self._refresh_target_windows()

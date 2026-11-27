@@ -55,36 +55,42 @@
     }
   }
 
-  function tileMeta(procName, displayName) {
+  function tileMeta(procName, displayName, iconDataUrl) {
+    if (iconDataUrl) {
+      return {
+        cls: "has-img",
+        svg: `<img class="tile-img" src="${iconDataUrl}" alt="" />`,
+      };
+    }
     const p = (procName || "").toLowerCase();
     if (p.includes("discord")) {
       return {
         cls: "t-discord",
-        svg: '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.7" stroke-linejoin="round"><path d="M20 5.5A15 15 0 0 0 16.4 4l-.4 1a12 12 0 0 0-8 0L7.6 4A15 15 0 0 0 4 5.5C2 9 1.4 12.6 1.8 16a15 15 0 0 0 4.6 2.3l.9-1.6a9 9 0 0 1-1.5-.8M22.2 16c-.4-3.4-1-7-2.2-10.5"/><path d="M8.5 12.5c0 .8.4 1.3 1 1.3s1-.5 1-1.3-.4-1.3-1-1.3-1 .5-1 1.3zm5 0c0 .8.4 1.3 1 1.3s1-.5 1-1.3-.4-1.3-1-1.3-1 .5-1 1.3z" fill="#fff" stroke="none"/></svg>',
+        svg: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.54 5.33A16.5 16.5 0 0 0 15.42 4a11.3 11.3 0 0 0-.52 1.07 15.2 15.2 0 0 0-5.8 0A11.3 11.3 0 0 0 8.58 4a16.5 16.5 0 0 0-4.12 1.33C1.86 9.35 1.15 13.27 1.5 17.13a16.6 16.6 0 0 0 5.04 2.57c.41-.56.77-1.15 1.08-1.78-.59-.22-1.16-.5-1.7-.82.14-.11.28-.22.42-.33 3.28 1.53 6.84 1.53 10.08 0 .14.11.28.22.42.33-.54.32-1.11.6-1.7.82.31.63.67 1.22 1.08 1.78a16.6 16.6 0 0 0 5.04-2.57c.41-4.47-.7-8.35-2.72-11.8ZM8.98 14.77c-.98 0-1.78-.91-1.78-2.02s.78-2.02 1.78-2.02c1 0 1.8.91 1.78 2.02 0 1.11-.78 2.02-1.78 2.02Zm6.04 0c-.98 0-1.78-.91-1.78-2.02s.78-2.02 1.78-2.02c1 0 1.8.91 1.78 2.02 0 1.11-.78 2.02-1.78 2.02Z"/></svg>',
       };
     }
     if (p.includes("chrome")) {
       return {
         cls: "t-chrome",
-        svg: '<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#4285f4" stroke-width="2"/><circle cx="12" cy="12" r="3.4" fill="#4285f4"/><path d="M12 8.6h7.8M9 14l-3.9 6.6M15 14l-3.9 6.6" stroke="#4285f4" stroke-width="1.6"/></svg>',
+        svg: '<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#60a5fa" stroke-width="1.8"/><circle cx="12" cy="12" r="3.5" fill="#60a5fa"/><path d="M12 8.5h8.29M15.03 13.75l-4.15 7.18M8.97 13.75L4.82 6.57" stroke="#60a5fa" stroke-width="1.7" stroke-linecap="round"/></svg>',
       };
     }
     if (p.includes("obs")) {
       return {
         cls: "t-obs",
-        svg: '<svg viewBox="0 0 24 24" fill="none" stroke="#e5e5e7" stroke-width="1.7" stroke-linejoin="round"><path d="M12 2.6 21 7.6v8.8L12 21.4 3 16.4V7.6z"/><path d="M12 8.4 16.6 11v4.6L12 18.2 7.4 15.6V11z"/></svg>',
+        svg: '<svg viewBox="0 0 24 24" fill="none" stroke="#e5e5e7" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 6.5a3.5 3.5 0 0 1 3.03 5.25M7.24 14.75a3.5 3.5 0 0 1 6.06 0M16.76 14.75a3.5 3.5 0 0 1-3.03-5.25"/></svg>',
       };
     }
     if (p.includes("explorer")) {
       return {
         cls: "t-explorer",
-        svg: '<svg viewBox="0 0 24 24" fill="none" stroke="#facc15" stroke-width="1.7" stroke-linejoin="round"><path d="M3 7.4c0-.8.6-1.4 1.4-1.4h4l2 2.2h8.2c.8 0 1.4.6 1.4 1.4v8.4c0 .8-.6 1.4-1.4 1.4H4.4c-.8 0-1.4-.6-1.4-1.4z"/></svg>',
+        svg: '<svg viewBox="0 0 24 24" fill="none" stroke="#e5b93b" stroke-width="1.7" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
       };
     }
     if (p.includes("spotify")) {
       return {
         cls: "t-spotify",
-        svg: '<svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M7.5 10c3-.8 6.5-.6 9 .6M8.5 13c2.5-.6 5-.4 7 .5M9.5 16c1.8-.4 3.5-.2 5 .4"/></svg>',
+        svg: '<svg viewBox="0 0 24 24" fill="none" stroke="#3fb950" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M7.5 9.8c3.2-.9 6.6-.6 9.2.7M8.3 12.8c2.6-.7 5.2-.4 7.4.6M9.2 15.7c1.9-.5 3.8-.3 5.4.4"/></svg>',
       };
     }
     const letter = escapeHtml((displayName || procName || "?").charAt(0).toUpperCase());
@@ -190,7 +196,7 @@
       q: query,
       mode: audioMode,
       sel: Array.from(selected).sort(),
-      rows: targets.map((t) => [t.process_name, t.display_name, t.window_titles, t.has_audio, t.currently_muted]),
+      rows: targets.map((t) => [t.process_name, t.display_name, t.window_titles, t.has_audio, t.currently_muted, Boolean(t.icon_data_url)]),
     });
     if (body.dataset.sig === sig) {
       return;
@@ -209,7 +215,7 @@
     body.innerHTML = targets
       .map((t) => {
         const isSel = selected.has((t.process_name || "").toLowerCase());
-        const meta = tileMeta(t.process_name, t.display_name);
+        const meta = tileMeta(t.process_name, t.display_name, t.icon_data_url);
         const winTxt =
           t.window_titles && t.window_titles.length
             ? t.window_titles.slice(0, 2).join(" · ")
@@ -468,13 +474,28 @@
 
     // Screen capture
     const sel = $("cap-target-select");
-    const procs = Array.from(new Set([...(state.open_processes || []), cfg.target_process || "geometrydash.exe"].filter(Boolean)));
-    const procsKey = JSON.stringify(procs);
-    if (sel.dataset.procsKey !== procsKey) {
-      sel.dataset.procsKey = procsKey;
-      sel.innerHTML = procs.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("");
+    const rawProcs = state.open_processes || [];
+    const procItems = [];
+    const seenProcs = new Set();
+    for (const item of rawProcs) {
+      const val = typeof item === "string" ? item : item && item.value;
+      const lbl = typeof item === "string" ? item : (item && item.label) || val;
+      if (val && !seenProcs.has(val)) {
+        seenProcs.add(val);
+        procItems.push({ value: val, label: lbl });
+      }
     }
     const wantTarget = cfg.target_process || "geometrydash.exe";
+    if (wantTarget && !seenProcs.has(wantTarget)) {
+      procItems.unshift({ value: wantTarget, label: wantTarget });
+    }
+    const procsKey = JSON.stringify(procItems);
+    if (sel.dataset.procsKey !== procsKey) {
+      sel.dataset.procsKey = procsKey;
+      sel.innerHTML = procItems
+        .map((p) => `<option value="${escapeHtml(p.value)}">${escapeHtml(p.label)}</option>`)
+        .join("");
+    }
     if (document.activeElement !== sel && sel.value !== wantTarget) {
       sel.value = wantTarget;
     }
