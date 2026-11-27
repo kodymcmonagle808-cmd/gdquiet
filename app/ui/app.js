@@ -328,17 +328,65 @@
     $("sidebar-restore-btn").textContent =
       audioMode === "duck" ? "Restore audio & undeafen" : "Unmute & undeafen all";
 
-    if (state.pending_update && state.pending_update.latest_version) {
+    const isBusy = Boolean(state.updating || state.checking_updates);
+    const updBtn = $("sidebar-update-btn");
+    const setUpdBtn = $("settings-check-updates-btn");
+    const bannerInstallBtn = $("update-banner-install");
+    updBtn.disabled = isBusy;
+    if (setUpdBtn) setUpdBtn.disabled = isBusy;
+    if (bannerInstallBtn) {
+      bannerInstallBtn.disabled = Boolean(state.updating);
+      bannerInstallBtn.textContent = state.updating ? state.update_btn_text || "Updating..." : "Update now";
+    }
+
+    const downBanner = $("downgrade-banner");
+    const downBannerBtn = $("downgrade-banner-btn");
+    const setDownBtn = $("settings-downgrade-btn");
+    const betaNote = $("settings-beta-note");
+    if (state.is_beta_build) {
+      const stableVer = state.latest_stable && state.latest_stable.version;
+      if (setDownBtn) {
+        setDownBtn.style.display = "inline-flex";
+        setDownBtn.disabled = isBusy;
+        setDownBtn.textContent = stableVer ? `Downgrade to v${stableVer}` : "Downgrade to latest stable";
+      }
+      if (betaNote) {
+        betaNote.style.display = "block";
+        betaNote.textContent = stableVer
+          ? `Running beta v${state.app_version}. You can downgrade to stable v${stableVer} anytime.`
+          : `Running beta v${state.app_version}. You can downgrade to the latest stable release anytime.`;
+      }
+      if (downBanner && downBannerBtn) {
+        if (state.show_downgrade_banner && state.latest_stable) {
+          $("downgrade-banner-txt").textContent = `You opted out of beta updates (currently on v${state.app_version}). Downgrade to latest stable v${state.latest_stable.version}?`;
+          downBannerBtn.disabled = Boolean(state.updating);
+          downBannerBtn.textContent = state.updating ? state.update_btn_text || "Downgrading..." : `Downgrade to v${state.latest_stable.version}`;
+          downBanner.classList.add("show");
+        } else {
+          downBanner.classList.remove("show");
+        }
+      }
+    } else {
+      if (setDownBtn) setDownBtn.style.display = "none";
+      if (betaNote) betaNote.style.display = "none";
+      if (downBanner) downBanner.classList.remove("show");
+    }
+
+    if (state.updating || state.checking_updates) {
+      $("sidebar-update-txt").textContent = state.update_btn_text || (state.updating ? "Updating..." : "Checking...");
+      updBtn.classList.remove("has-update");
+      if (setUpdBtn) setUpdBtn.textContent = state.update_btn_text || "Checking...";
+    } else if (state.pending_update && state.pending_update.latest_version) {
       $("sidebar-update-txt").textContent = `Install v${state.pending_update.latest_version} update`;
-      $("sidebar-update-btn").classList.add("has-update");
-      if ($("settings-check-updates-btn")) {
-        $("settings-check-updates-btn").textContent = `Install v${state.pending_update.latest_version} update`;
+      updBtn.classList.add("has-update");
+      if (setUpdBtn) {
+        setUpdBtn.textContent = `Install v${state.pending_update.latest_version} update`;
       }
     } else {
       $("sidebar-update-txt").textContent = state.update_btn_text || "Check for updates";
-      $("sidebar-update-btn").classList.remove("has-update");
-      if ($("settings-check-updates-btn")) {
-        $("settings-check-updates-btn").textContent = state.update_btn_text || "Check for updates now";
+      updBtn.classList.remove("has-update");
+      if (setUpdBtn) {
+        setUpdBtn.textContent = "Check for updates now";
       }
     }
     $("footer-msg").textContent = state.footer_message || "";
@@ -694,6 +742,12 @@
     $("update-banner-later").addEventListener("click", async () => {
       await mutate((a) => a.dismiss_update_banner());
     });
+    $("downgrade-banner-btn").addEventListener("click", async () => {
+      await mutate((a) => a.downgrade_to_stable());
+    });
+    $("downgrade-banner-later").addEventListener("click", async () => {
+      await mutate((a) => a.dismiss_downgrade_banner());
+    });
     $("level-yes").addEventListener("click", async () => {
       await mutate((a) => a.confirm_level_candidate());
     });
@@ -924,6 +978,9 @@
     });
     $("settings-check-updates-btn").addEventListener("click", async () => {
       await mutate((a) => a.check_or_install_update());
+    });
+    $("settings-downgrade-btn").addEventListener("click", async () => {
+      await mutate((a) => a.downgrade_to_stable());
     });
     $("open-config-btn").addEventListener("click", () => {
       api() && api().open_config_folder();

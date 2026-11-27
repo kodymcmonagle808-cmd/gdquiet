@@ -34,10 +34,12 @@ from updater import (
     UpdateError,
     UpdateInfo,
     check_for_update,
+    check_latest_stable_release,
     cleanup_stale_update_files,
     current_executable_path,
     download_update,
     is_packaged_executable,
+    is_prerelease_version,
     launch_update_swap_and_restart,
 )
 from window_audio import (
@@ -242,10 +244,15 @@ class GDQuietWebApp:
         self._watch_hotkey_status = "Inactive"
 
         self._pending_update: UpdateInfo | None = None
+        self._latest_stable: UpdateInfo | None = None
+        self._is_beta_build = is_prerelease_version(APP_VERSION)
         self._dismissed_update_version = ""
+        self._dismissed_downgrade = False
         self._update_btn_text = "Check for updates"
         self._footer_message = ""
         self._updating = False
+        self._checking_updates = False
+        self._update_check_lock = threading.Lock()
 
         self._pending_level_raw = ""
         self._pending_level_display = ""
@@ -570,8 +577,28 @@ class GDQuietWebApp:
             else "No confirmed level profile"
         )
 
+        latest_stable_dict = (
+            {
+                "version": self._latest_stable.latest_version,
+                "tag_name": self._latest_stable.tag_name,
+                "is_downgrade": self._latest_stable.is_downgrade,
+            }
+            if self._latest_stable is not None
+            else None
+        )
+        show_downgrade_banner = bool(
+            self._is_beta_build
+            and not cfg_copy.get("beta_updates", False)
+            and not self._dismissed_downgrade
+            and self._latest_stable is not None
+            and self._latest_stable.is_downgrade
+        )
+
         return {
             "app_version": APP_VERSION,
+            "is_beta_build": self._is_beta_build,
+            "latest_stable": latest_stable_dict,
+            "show_downgrade_banner": show_downgrade_banner,
             "config_path": str(config_path()),
             "cfg": cfg_copy,
             "status": {
@@ -602,6 +629,8 @@ class GDQuietWebApp:
             "pending_update": pending_upd,
             "show_update_banner": show_banner,
             "update_btn_text": self._update_btn_text,
+            "updating": self._updating,
+            "checking_updates": self._checking_updates,
             "footer_message": self._footer_message,
             "obs": {
                 "running": self.obs_overlay_server.running,
@@ -673,6 +702,10 @@ class GDQuietWebApp:
         elif key == "always_on_top":
             self._apply_window_preferences()
         elif key == "beta_updates":
+            self._dismissed_update_version = ""
+            if not value:
+                self._pending_update = None
+                self._dismissed_downgrade = False
             threading.Thread(target=lambda: self._check_updates_sync(silent=False), daemon=True).start()
         elif key == "auto_deafen" and not value:
             if self.discord_ctrl.deafened_by_us:
@@ -1277,16 +1310,31 @@ class GDQuietWebApp:
             if not self._updating and self.cfg.get("auto_check_updates", True):
                 self._check_updates_sync(silent=True)
 
+    def _refresh_latest_stable_locked(self) -> None:
+        if not self._is_beta_build:
+            self._latest_stable = None
+            return
+        try:
+            stable = check_latest_stable_release(current_version=APP_VERSION)
+            if stable.download_url and (stable.is_downgrade or stable.update_available):
+                self._latest_stable = stable
+        except Exception:
+            pass
+
     def _check_updates_sync(self, silent: bool = True) -> None:
         if self._updating or self._closing:
             return
-        if not silent:
-            self._update_btn_text = "Checking..."
-            self._footer_message = ""
+        if not self._update_check_lock.acquire(blocking=False):
+            return
         try:
+            self._checking_updates = True
+            if not silent:
+                self._update_btn_text = "Checking..."
+                self._footer_message = "Checking for updates..."
             with self.cfg_lock:
                 include_pre = bool(self.cfg.get("beta_updates", False))
             info = check_for_update(current_version=APP_VERSION, include_prereleases=include_pre)
+            self._refresh_latest_stable_locked()
             if info.update_available:
                 self._pending_update = info
                 self._update_btn_text = f"Install v{info.latest_version} update"
@@ -1295,7 +1343,12 @@ class GDQuietWebApp:
                 self._pending_update = None
                 self._update_btn_text = "Check for updates"
                 if not silent:
-                    self._footer_message = f"You are up to date (v{APP_VERSION})."
+                    if self._is_beta_build and not include_pre and self._latest_stable and self._latest_stable.is_downgrade:
+                        self._footer_message = (
+                            f"On beta v{APP_VERSION}. Latest stable v{self._latest_stable.latest_version} is available to downgrade."
+                        )
+                    else:
+                        self._footer_message = f"You are up to date (v{APP_VERSION})."
         except UpdateError as exc:
             self._update_btn_text = "Check for updates"
             if not silent:
@@ -1304,10 +1357,19 @@ class GDQuietWebApp:
             self._update_btn_text = "Check for updates"
             if not silent:
                 self._footer_message = f"Update check failed: {exc}"
+        finally:
+            self._checking_updates = False
+            self._update_check_lock.release()
 
     def check_or_install_update(self) -> dict[str, Any]:
+        if self._updating or self._checking_updates:
+            return self.get_state()
         if self._pending_update is not None and self._pending_update.update_available:
             return self.install_pending_update()
+        self._dismissed_update_version = ""
+        self._checking_updates = True
+        self._update_btn_text = "Checking..."
+        self._footer_message = "Checking for updates..."
         threading.Thread(target=lambda: self._check_updates_sync(silent=False), daemon=True).start()
         return self.get_state()
 
@@ -1316,25 +1378,32 @@ class GDQuietWebApp:
             self._dismissed_update_version = self._pending_update.latest_version
         return self.get_state()
 
-    def install_pending_update(self) -> dict[str, Any]:
-        info = self._pending_update
-        if info is None or not info.update_available or self._updating:
-            return self.get_state()
+    def dismiss_downgrade_banner(self) -> dict[str, Any]:
+        self._dismissed_downgrade = True
+        return self.get_state()
 
+    def _start_installer_download(self, info: UpdateInfo, restore_btn_text: str, action_word: str) -> dict[str, Any]:
         if not is_packaged_executable():
             webbrowser.open(info.release_url)
             self._footer_message = f"Opened release page for v{info.latest_version}."
             return self.get_state()
 
         self._updating = True
-        self._update_btn_text = "Downloading update..."
-        self._footer_message = f"Downloading v{info.latest_version}..."
+        self._update_btn_text = "Downloading 0%..."
+        self._footer_message = f"{action_word} v{info.latest_version}..."
 
         def worker() -> None:
             try:
                 target_exe = current_executable_path()
-                staged_file = download_update(info, target_exe)
-                self._update_btn_text = "Restarting to update..."
+
+                def on_prog(done: int, total: int) -> None:
+                    pct = f"{int(done * 100 / total)}%" if total > 0 else f"{done // 1024} KB"
+                    self._update_btn_text = f"Downloading {pct}..."
+                    self._footer_message = f"{action_word} v{info.latest_version} ({pct})..."
+
+                staged_file = download_update(info, target_exe, progress_cb=on_prog)
+                self._update_btn_text = "Launching setup..." if info.is_installer else "Restarting..."
+                self._footer_message = "Starting installer..."
                 self._cleanup_sync()
                 self._save_cfg()
                 launch_update_swap_and_restart(
@@ -1349,12 +1418,83 @@ class GDQuietWebApp:
                         self.window.destroy()
                     except Exception:
                         pass
+                threading.Timer(1.2, lambda: os._exit(0)).start()
             except Exception as exc:
                 self._updating = False
-                self._update_btn_text = f"Install v{info.latest_version} update"
+                self._update_btn_text = restore_btn_text
                 self._footer_message = f"Update failed: {exc}"
 
         threading.Thread(target=worker, daemon=True).start()
+        return self.get_state()
+
+    def install_pending_update(self) -> dict[str, Any]:
+        info = self._pending_update
+        if info is None or not info.update_available or self._updating:
+            return self.get_state()
+        return self._start_installer_download(
+            info,
+            restore_btn_text=f"Install v{info.latest_version} update",
+            action_word="Downloading",
+        )
+
+    def downgrade_to_stable(self) -> dict[str, Any]:
+        if self._updating or not self._is_beta_build:
+            return self.get_state()
+
+        def resolve_and_install() -> None:
+            try:
+                info = self._latest_stable or check_latest_stable_release(current_version=APP_VERSION)
+                if not info.download_url:
+                    self._updating = False
+                    self._update_btn_text = "Check for updates"
+                    self._footer_message = "No stable release installer found."
+                    return
+                self._latest_stable = info
+                if not is_packaged_executable():
+                    webbrowser.open(info.release_url)
+                    self._updating = False
+                    self._update_btn_text = "Check for updates"
+                    self._footer_message = f"Opened stable release page for v{info.latest_version}."
+                    return
+                target_exe = current_executable_path()
+
+                def on_prog(done: int, total: int) -> None:
+                    pct = f"{int(done * 100 / total)}%" if total > 0 else f"{done // 1024} KB"
+                    self._update_btn_text = f"Downloading {pct}..."
+                    self._footer_message = f"Downgrading to v{info.latest_version} ({pct})..."
+
+                staged_file = download_update(info, target_exe, progress_cb=on_prog)
+                self._update_btn_text = "Launching setup..."
+                self._footer_message = f"Starting stable v{info.latest_version} installer..."
+                self._cleanup_sync()
+                self._save_cfg()
+                launch_update_swap_and_restart(
+                    staged_file,
+                    target_exe,
+                    current_pid=os.getpid(),
+                    is_installer=info.is_installer,
+                )
+                self._force_exit = True
+                if self.window is not None:
+                    try:
+                        self.window.destroy()
+                    except Exception:
+                        pass
+                threading.Timer(1.2, lambda: os._exit(0)).start()
+            except Exception as exc:
+                self._updating = False
+                self._update_btn_text = "Check for updates"
+                self._footer_message = f"Downgrade failed: {exc}"
+
+        if self._latest_stable is not None and not is_packaged_executable():
+            webbrowser.open(self._latest_stable.release_url)
+            self._footer_message = f"Opened stable release page for v{self._latest_stable.latest_version}."
+            return self.get_state()
+
+        self._updating = True
+        self._update_btn_text = "Preparing downgrade..."
+        self._footer_message = "Checking latest stable release..."
+        threading.Thread(target=resolve_and_install, daemon=True).start()
         return self.get_state()
 
     # ---- Cleanup ----
@@ -1437,6 +1577,12 @@ class WebApi:
 
     def dismiss_update_banner(self) -> dict[str, Any]:
         return self._app.dismiss_update_banner()
+
+    def dismiss_downgrade_banner(self) -> dict[str, Any]:
+        return self._app.dismiss_downgrade_banner()
+
+    def downgrade_to_stable(self) -> dict[str, Any]:
+        return self._app.downgrade_to_stable()
 
     def set_watch_hotkey(self, spec: dict[str, Any]) -> dict[str, Any]:
         return self._app.set_watch_hotkey(spec)

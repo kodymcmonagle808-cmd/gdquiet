@@ -87,6 +87,14 @@
         </div>
       </div>
 
+      <div class="banner level" id="downgrade-banner">
+        <span id="downgrade-banner-txt"></span>
+        <div class="banner-actions">
+          <button type="button" class="btn primary sm" id="downgrade-banner-btn">Downgrade to stable</button>
+          <button type="button" class="btn ghost sm" id="downgrade-banner-later">Later</button>
+        </div>
+      </div>
+
       <div class="banner level" id="level-banner">
         <span id="level-banner-txt"></span>
         <div class="banner-actions">
@@ -525,7 +533,9 @@
             </div>
             <div class="btnrow">
               <button type="button" class="btn ghost sm" id="settings-check-updates-btn">Check for updates now</button>
+              <button type="button" class="btn ghost sm" id="settings-downgrade-btn" style="display:none">Downgrade to latest stable</button>
             </div>
+            <p class="set-note" id="settings-beta-note" style="display:none"></p>
           </section>
 
           <section class="card span2">

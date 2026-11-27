@@ -1326,6 +1326,82 @@ class GDQuietTests(unittest.TestCase):
             finally:
                 app._cleanup_sync()
 
+    def test_downgrade_to_stable_from_beta_and_rate_limit_fallback(self) -> None:
+        import io
+        import json
+        import urllib.error
+        import web_ui
+
+        self.assertTrue(updater.is_prerelease_version("4.4.0-beta.1"))
+        self.assertFalse(updater.is_prerelease_version("4.3.2"))
+
+        stable_payload = {
+            "tag_name": "v4.3.2",
+            "html_url": "https://github.com/kodymcmonagle808-cmd/gdquiet/releases/tag/v4.3.2",
+            "body": "Stable",
+            "assets": [
+                {
+                    "name": "GDQuiet-Setup.exe",
+                    "browser_download_url": "https://github.com/kodymcmonagle808-cmd/gdquiet/releases/download/v4.3.2/GDQuiet-Setup.exe",
+                    "size": 1024,
+                }
+            ],
+        }
+
+        class FakeResp(io.BytesIO):
+            def __init__(self, data: bytes) -> None:
+                super().__init__(data)
+                self.headers = {"Content-Length": str(len(data))}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                self.close()
+
+        with patch("urllib.request.urlopen", return_value=FakeResp(json.dumps(stable_payload).encode())):
+            stable_info = updater.check_latest_stable_release(current_version="4.4.0-beta.1")
+        self.assertEqual(stable_info.latest_version, "4.3.2")
+        self.assertFalse(stable_info.update_available)
+        self.assertTrue(stable_info.is_downgrade)
+
+        # Verify HTTP 403 rate-limit fallback for stable releases
+        http_403 = urllib.error.HTTPError(
+            updater.RELEASES_API_URL, 403, "rate limit exceeded", {}, None
+        )
+        web_json = json.dumps({"tag_name": "v4.3.2"}).encode()
+        with patch("urllib.request.urlopen", side_effect=[http_403, FakeResp(web_json)]):
+            fallback_info = updater.check_for_update(current_version="4.0.0", include_prereleases=False)
+        self.assertTrue(fallback_info.update_available)
+        self.assertEqual(fallback_info.latest_version, "4.3.2")
+        self.assertTrue(fallback_info.download_url.endswith("/v4.3.2/GDQuiet-Setup.exe"))
+
+        with (
+            patch.object(web_ui, "APP_VERSION", "4.4.0-beta.1"),
+            patch.object(web_ui, "load_config", return_value=dict(config.DEFAULT_CONFIG, beta_updates=False)),
+            patch.object(web_ui, "save_config"),
+            patch.object(web_ui, "list_mute_targets", return_value=[]),
+            patch.object(web_ui, "list_open_window_processes", return_value=["geometrydash.exe"]),
+            patch.object(web_ui, "ScreenPercentWatcher"),
+            patch.object(web_ui, "check_for_update", return_value=stable_info),
+            patch.object(web_ui, "check_latest_stable_release", return_value=stable_info),
+            patch("webbrowser.open") as mock_open,
+        ):
+            app = web_ui.GDQuietWebApp()
+            try:
+                app._check_updates_sync(silent=False)
+                st = app.get_state()
+                self.assertTrue(st["is_beta_build"])
+                self.assertEqual(st["latest_stable"]["version"], "4.3.2")
+                self.assertTrue(st["latest_stable"]["is_downgrade"])
+                self.assertTrue(st["show_downgrade_banner"])
+
+                st = app.downgrade_to_stable()
+                mock_open.assert_called_once_with(stable_info.release_url)
+                self.assertIn("4.3.2", st["footer_message"])
+            finally:
+                app._cleanup_sync()
+
 
 if __name__ == "__main__":
     unittest.main()

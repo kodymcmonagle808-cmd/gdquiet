@@ -14,11 +14,12 @@ from functools import cmp_to_key
 from pathlib import Path
 from typing import Callable
 
-APP_VERSION = "4.3.1"
+APP_VERSION = "4.3.2"
 GITHUB_REPO = "kodymcmonagle808-cmd/gdquiet"
 RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 RELEASES_LIST_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=100"
 RELEASES_PAGE_URL = f"https://github.com/{GITHUB_REPO}/releases"
+RELEASES_LATEST_WEB_URL = f"https://github.com/{GITHUB_REPO}/releases/latest"
 _VERSION_RE = re.compile(
     r"^[vV]?(?P<release>\d+(?:\.\d+)*)(?:-(?P<prerelease>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
 )
@@ -41,6 +42,7 @@ class UpdateInfo:
     sha256: str
     release_notes: str
     is_installer: bool = False
+    is_downgrade: bool = False
 
 
 def parse_version(version_str: str) -> tuple[int, ...]:
@@ -94,6 +96,11 @@ def is_newer_version(latest: str, current: str) -> bool:
     return _compare_versions(latest, current) > 0
 
 
+def is_prerelease_version(version_str: str) -> bool:
+    _, pre = _version_parts(version_str)
+    return pre is not None
+
+
 def _is_installer_asset_name(name: str) -> bool:
     low = (name or "").lower()
     return "setup" in low or "installer" in low
@@ -119,6 +126,42 @@ def _select_exe_asset(assets: list[dict[str, object]]) -> dict[str, object] | No
     return None
 
 
+def _fallback_latest_from_web(current_version: str, timeout_s: float) -> UpdateInfo | None:
+    req = urllib.request.Request(
+        RELEASES_LATEST_WEB_URL,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": f"GDQuiet/{current_version}",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    tag_name = str(payload.get("tag_name") or "").strip()
+    if not tag_name:
+        return None
+    latest_version = tag_name.lstrip("vV") or current_version
+    download_url = f"https://github.com/{GITHUB_REPO}/releases/download/{tag_name}/GDQuiet-Setup.exe"
+    release_url = f"https://github.com/{GITHUB_REPO}/releases/tag/{tag_name}"
+    return UpdateInfo(
+        current_version=current_version,
+        latest_version=latest_version,
+        tag_name=tag_name,
+        update_available=is_newer_version(latest_version, current_version),
+        download_url=download_url,
+        release_url=release_url,
+        asset_name="GDQuiet-Setup.exe",
+        size_bytes=0,
+        sha256="",
+        release_notes="",
+        is_installer=True,
+    )
+
+
 def check_for_update(
     current_version: str = APP_VERSION,
     timeout_s: float = 10.0,
@@ -136,8 +179,16 @@ def check_for_update(
         with urllib.request.urlopen(req, timeout=timeout_s) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
+        if not include_prereleases and exc.code in (403, 429):
+            fallback = _fallback_latest_from_web(current_version, timeout_s)
+            if fallback is not None:
+                return fallback
         raise UpdateError(f"GitHub API HTTP {exc.code}") from exc
     except Exception as exc:
+        if not include_prereleases:
+            fallback = _fallback_latest_from_web(current_version, timeout_s)
+            if fallback is not None:
+                return fallback
         raise UpdateError(f"Update check failed: {exc}") from exc
 
     if include_prereleases and isinstance(data, list):
@@ -203,6 +254,37 @@ def check_for_update(
         sha256=sha256,
         release_notes=release_notes,
         is_installer=_is_installer_asset_name(asset_name),
+    )
+
+
+def check_latest_stable_release(
+    current_version: str = APP_VERSION,
+    timeout_s: float = 10.0,
+) -> UpdateInfo:
+    info = check_for_update(
+        current_version=current_version,
+        timeout_s=timeout_s,
+        include_prereleases=False,
+    )
+    can_downgrade = (
+        bool(info.download_url)
+        and is_prerelease_version(current_version)
+        and not is_prerelease_version(info.latest_version)
+        and _compare_versions(info.latest_version, current_version) < 0
+    )
+    return UpdateInfo(
+        current_version=info.current_version,
+        latest_version=info.latest_version,
+        tag_name=info.tag_name,
+        update_available=info.update_available,
+        download_url=info.download_url,
+        release_url=info.release_url,
+        asset_name=info.asset_name,
+        size_bytes=info.size_bytes,
+        sha256=info.sha256,
+        release_notes=info.release_notes,
+        is_installer=info.is_installer,
+        is_downgrade=can_downgrade,
     )
 
 
