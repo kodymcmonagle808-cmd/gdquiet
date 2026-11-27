@@ -112,11 +112,12 @@ h1{font-size:16.5px;font-weight:600;margin:0;letter-spacing:-.01em}
 .saved.show{opacity:1}
 
 /* ---------- banners ---------- */
-.banner{display:none;align-items:center;justify-content:space-between;gap:12px;padding:9px 12px;border-radius:2px;margin-bottom:12px;font-size:12px}
+.banner{display:none;align-items:flex-start;justify-content:space-between;gap:12px;padding:9px 12px;border-radius:2px;margin-bottom:12px;font-size:12px;flex-wrap:wrap}
 .banner.show{display:flex}
 .banner.update{background:#1b282c;border:1px solid #2c4a52;color:var(--ink)}
 .banner.level{background:#2a2419;border:1px solid #574828;color:var(--ink);flex-wrap:wrap}
 .banner-actions{display:flex;align-items:center;gap:6px;flex:none}
+.patch-notes{display:none;width:100%;margin-top:4px;padding:7px 10px;border-radius:2px;background:rgba(0,0,0,.2);border:1px solid rgba(255,255,255,.06);font-size:11.5px;line-height:1.55;color:var(--muted);white-space:pre-wrap;max-height:140px;overflow-y:auto}
 .level-corr{display:none;width:100%;gap:6px;margin-top:6px}
 .level-corr.show{display:flex}
 .level-corr input{flex:1;height:28px;border-radius:2px;background:var(--sunken);border:1px solid var(--line2);padding:0 9px;font-size:12px}

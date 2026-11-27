@@ -399,6 +399,17 @@
     const uBanner = $("update-banner");
     if (state.show_update_banner && state.pending_update) {
       $("update-banner-txt").textContent = `New version v${state.pending_update.latest_version} is available (current: v${state.app_version}).`;
+      const notesEl = $("update-banner-notes");
+      if (notesEl) {
+        const notes = (state.pending_update.release_notes || "").trim();
+        if (notes) {
+          notesEl.textContent = notes;
+          notesEl.style.display = "block";
+        } else {
+          notesEl.textContent = "";
+          notesEl.style.display = "none";
+        }
+      }
       uBanner.classList.add("show");
     } else {
       uBanner.classList.remove("show");

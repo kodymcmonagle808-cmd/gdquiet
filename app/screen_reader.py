@@ -33,7 +33,8 @@ SM_CYVIRTUALSCREEN = 79
 WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
 
 # Maps white-ish HUD score (0..255) to dark ink (0..255, inverted for OCR).
-_WHITE_LUT = [255 if v < 110 else max(0, 255 - int((v - 110) * 2.2)) for v in range(256)]
+# Threshold at 90 to catch subtly tinted or off-white HUD text.
+_WHITE_LUT = [255 if v < 90 else max(0, 255 - int((v - 90) * 1.8)) for v in range(256)]
 _LUMA_LUT = [255 if v < 165 else max(0, 255 - int((v - 165) * 2.8)) for v in range(256)]
 _DARK_INK_MASK = [255 if v < 245 else 0 for v in range(256)]
 
@@ -55,7 +56,7 @@ _LEVEL_MENU_LABELS = {
 
 _WINDOW_CACHE_LOCK = threading.Lock()
 _WINDOW_CACHE: dict[str, tuple[int, float]] = {}
-_WINDOW_CACHE_TTL_S = 2.0
+_WINDOW_CACHE_TTL_S = 5.0
 
 
 class POINT(ctypes.Structure):
@@ -425,6 +426,16 @@ class WinRtPercentOcr:
             pct = parse_percent_from_text(text, last_percent=last_percent)
             if pct is not None:
                 return pct, text, bbox, use_luma
+        # Fallback: try raw RGBA OCR when preprocessing fails to find text.
+        if not first_text and captured.width >= 16 and captured.height >= 8:
+            raw_text = self.recognize_text(
+                captured if captured.mode == "RGBA" else captured.convert("RGBA")
+            )
+            if raw_text:
+                first_text = raw_text
+                pct = parse_percent_from_text(raw_text, last_percent=last_percent)
+                if pct is not None:
+                    return pct, raw_text, None, prefer_luma
         return None, first_text, None, prefer_luma
 
     def read_percent(

@@ -558,6 +558,7 @@ class GDQuietWebApp:
             pending_upd = {
                 "latest_version": self._pending_update.latest_version,
                 "tag_name": self._pending_update.tag_name,
+                "release_notes": self._pending_update.release_notes or "",
             }
             show_banner = self._pending_update.latest_version != self._dismissed_update_version
 
@@ -582,6 +583,7 @@ class GDQuietWebApp:
                 "version": self._latest_stable.latest_version,
                 "tag_name": self._latest_stable.tag_name,
                 "is_downgrade": self._latest_stable.is_downgrade,
+                "release_notes": self._latest_stable.release_notes or "",
             }
             if self._latest_stable is not None
             else None
