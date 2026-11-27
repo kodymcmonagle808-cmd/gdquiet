@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GD Quiet — Apps to mute</title>
+<meta name="color-scheme" content="dark" />
+<style>
+  :root{
+    --bg:#0e0e11;--panel:#131317;--card:#1a1a1f;--card2:#191920;--plot:#14141a;
+    --line:rgba(255,255,255,.075);
+    --ink:#f2f2f4;--muted:#a1a1aa;--faint:#6f6f7a;
+    --accent:#5a52c9;--accent-soft:rgba(90,82,201,.2);
+    --green:#22c55e;--amber:#facc15;--red:#ef4444;
+    --mono:"Cascadia Mono",Consolas,ui-monospace,SFMono-Regular,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:13.5px/1.5 "Segoe UI",system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+  input,select{font:inherit;color:inherit}
+  .app{display:grid;grid-template-columns:248px minmax(0,1fr);min-height:calc(100vh - 32px)}
+  .titlebar{position:sticky;top:0;z-index:30;display:flex;align-items:center;justify-content:space-between;height:32px;padding-left:11px;background:#0b0b0d;border-bottom:1px solid var(--line);user-select:none}
+  .tb-name{display:flex;align-items:center;gap:8px;font-size:11.5px;color:#7c7c85}
+  .tb-name b{font-weight:600;color:#c2c2c9}
+  .tb-mark{width:12px;height:12px;border-radius:3px;background:var(--accent)}
+  .tb-controls{display:flex;height:100%}
+  .tb-controls span{width:44px;display:grid;place-items:center;font-size:10px;color:#8a8a92;line-height:1}
+  .tb-controls span:hover{background:rgba(255,255,255,.07);color:#e6e6ea}
+  .tb-controls span.close:hover{background:#c42b1c;color:#fff}
+
+  /* ---------- sidebar ---------- */
+  .sidebar{position:sticky;top:32px;height:calc(100vh - 32px);display:flex;flex-direction:column;gap:16px;padding:16px 10px 12px;background:var(--panel);border-right:1px solid var(--line)}
+  .brand{display:flex;align-items:center;gap:9px;padding:2px 8px 4px}
+  .logo{width:26px;height:26px;border-radius:5px;background:var(--accent);display:grid;place-items:center;flex:none}
+  .name{font-size:14.5px;font-weight:600;letter-spacing:-.01em;line-height:1.15}
+  .sub{font-size:9px;font-weight:600;letter-spacing:.16em;color:var(--faint)}
+  .navlabel{font-size:9px;font-weight:600;letter-spacing:.18em;color:#5b5b66;padding-left:10px}
+  nav{display:flex;flex-direction:column;gap:2px;margin-top:-10px}
+  nav a{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;font-size:13px;color:var(--muted);transition:background .15s,color .15s}
+  nav a:hover{background:rgba(255,255,255,.045);color:var(--ink)}
+  nav a.on{background:var(--accent-soft);color:#cfc9ff}
+  nav a svg{width:15px;height:15px;flex:none;opacity:.85}
+  .badge{margin-left:auto;font-size:11px;font-variant-numeric:tabular-nums;background:rgba(255,255,255,.08);border-radius:5px;padding:1px 6px;color:var(--muted)}
+  .watcher{margin-top:auto;background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:13px}
+  .watcher-head{display:flex;align-items:center;gap:7px;font-size:9px;font-weight:600;letter-spacing:.15em;color:var(--amber)}
+  .dot{width:6px;height:6px;border-radius:50%;background:currentColor;box-shadow:0 0 8px currentColor;flex:none}
+  .watcher-pct{font-size:21px;font-weight:600;letter-spacing:-.02em;margin-top:9px;font-variant-numeric:tabular-nums}
+  .watcher-sub{font-size:11px;color:var(--faint)}
+  .watcher-thresh{font-size:10.5px;color:var(--faint);text-align:center;margin-top:8px}
+  .sidebar-foot{display:flex;flex-direction:column;gap:9px}
+  .ver{display:flex;justify-content:space-between;align-items:center;font-size:10.5px;color:#5b5b66;padding:2px 4px 0}
+  .ver a{display:inline-flex;align-items:center;gap:4px;color:var(--faint)}
+  .ver a:hover{color:var(--muted)}
+
+  /* ---------- controls ---------- */
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:31px;padding:0 12px;border-radius:5px;font-size:12px;font-weight:500;border:1px solid transparent;white-space:nowrap;transition:background .15s,border-color .15s,color .15s}
+  .btn.primary{background:var(--accent);color:#fff}
+  .btn.primary:hover{background:#6a61d8}
+  .btn.ghost{background:rgba(255,255,255,.04);border-color:var(--line);color:#d4d4d8}
+  .btn.ghost:hover{background:rgba(255,255,255,.07)}
+  .btn.block{width:100%}
+  .btn.sm{height:30px;font-size:12px;padding:0 11px}
+  kbd{font-family:inherit;font-size:10px;font-weight:600;padding:2px 5px;border-radius:4px;background:rgba(255,255,255,.16);letter-spacing:.04em}
+  .link{font-size:11.5px;color:var(--faint);text-align:center}
+  .link:hover{color:var(--muted)}
+  .toggle{width:36px;height:20px;border-radius:99px;background:rgba(255,255,255,.14);position:relative;transition:background .2s;flex:none;padding:0}
+  .toggle::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .2s}
+  .toggle.on{background:var(--accent)}
+  .toggle.on::after{transform:translateX(16px)}
+  input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:18px;background:transparent;cursor:pointer}
+  input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:99px;background:linear-gradient(to right,var(--accent) var(--fill,59%),rgba(255,255,255,.12) var(--fill,59%))}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:#fff;margin-top:-4.5px;box-shadow:0 0 0 3px rgba(109,94,245,.35)}
+  input[type=range]::-moz-range-track{height:4px;border-radius:99px;background:rgba(255,255,255,.12)}
+  input[type=range]::-moz-range-progress{height:4px;border-radius:99px;background:var(--accent)}
+  input[type=range]::-moz-range-thumb{width:13px;height:13px;border:0;border-radius:50%;background:#fff}
+
+  /* ---------- main ---------- */
+  main{padding:26px 34px 60px;max-width:1240px}
+  .topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+  .crumb{font-size:10px;letter-spacing:.05em;color:#5f5f68;font-weight:500}
+  h1{font-size:23px;font-weight:600;letter-spacing:-.02em;margin:8px 0 5px}
+  .lead{color:var(--muted);font-size:13.5px;margin:0}
+  .saved{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:#4ade80;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.22);padding:5px 10px;border-radius:7px;white-space:nowrap}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:15px 16px}
+  .card h2{font-size:13px;font-weight:600;margin:6px 0 0;letter-spacing:0}
+  .eyebrow{font-size:10px;letter-spacing:.04em;color:#7b7b84;font-weight:600}
+  .muted{color:var(--muted);font-size:12.5px;margin:6px 0 0;line-height:1.6}
+
+  /* ---------- summary ---------- */
+  .summary{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-top:22px}
+  .summary h2{font-size:19px;font-weight:600;letter-spacing:-.02em;margin:0}
+  .summary p{font-size:12.5px;color:var(--muted);margin:4px 0 0}
+  .summary .right{text-align:right;flex:none}
+  .summary .right b{display:block;font-size:22px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+  .summary .right span{font-size:9px;letter-spacing:.14em;color:#5f5f6a;font-weight:600}
+
+  /* ---------- toolbar ---------- */
+  .toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:16px}
+  .search{position:relative;flex:1 1 240px;min-width:200px}
+  .search svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:#5f5f6a}
+  .search input{width:100%;height:34px;padding:0 12px 0 33px;border-radius:8px;background:#131318;border:1px solid var(--line);font-size:12.5px}
+  .search input::placeholder{color:#5f5f6a}
+  .search input:focus{border-color:rgba(109,94,245,.55)}
+  .check{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);cursor:pointer;user-select:none}
+  .check input{width:14px;height:14px;accent-color:var(--accent)}
+
+  /* ---------- list ---------- */
+  .list{margin-top:14px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#16161b}
+  .thead,.trow{display:grid;grid-template-columns:minmax(0,1fr) 130px 104px;gap:16px;align-items:center;padding:12px 16px}
+  .thead{background:#191920;border-bottom:1px solid var(--line);font-size:9px;letter-spacing:.14em;color:#5f5f6a;font-weight:600}
+  .thead span:nth-child(2),.thead span:nth-child(3){text-align:left}
+  .trow{border-bottom:1px solid rgba(255,255,255,.05)}
+  .trow:last-child{border-bottom:0}
+  .trow:hover{background:rgba(255,255,255,.022)}
+  .app-cell{display:flex;align-items:center;gap:12px;min-width:0}
+  .tile{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;flex:none;border:1px solid rgba(255,255,255,.08)}
+  .tile svg{width:17px;height:17px}
+  .t-discord{background:#5865f2}
+  .t-chrome{background:#1f2a3a}
+  .t-obs{background:#151519}
+  .t-explorer{background:#3a2f12}
+  .app-name{font-size:13px;font-weight:500}
+  .app-exe{font-family:var(--mono);font-size:10.5px;color:#6f6f7a;margin-top:1px}
+  .app-win{font-size:11px;color:#5f5f6a;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:420px}
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:11px;padding:4px 9px;border-radius:6px;white-space:nowrap}
+  .pill.active{color:#4ade80;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.2)}
+  .pill.window{color:#a1a1aa;background:rgba(255,255,255,.05);border:1px solid var(--line)}
+  .pill .dot{width:5px;height:5px;box-shadow:none}
+  .act{font-size:11.5px;color:#cfc9ff;background:var(--accent-soft);border:1px solid rgba(109,94,245,.3);border-radius:6px;padding:5px 9px;justify-self:start}
+  .list-foot{display:flex;justify-content:space-between;gap:12px;font-size:11px;color:#5f5f6a;padding:11px 4px 0}
+
+  /* ---------- bottom panel ---------- */
+  .never{display:flex;gap:12px;align-items:flex-start;margin-top:18px;background:#16161b;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:10px;padding:14px 16px}
+  .never svg{width:16px;height:16px;flex:none;margin-top:2px;color:#a99fff}
+  .never b{font-size:13px;font-weight:600;display:block}
+  .never p{font-size:12px;color:var(--muted);margin:3px 0 0;line-height:1.6}
+
+  @media (max-width:1080px){
+    .app{grid-template-columns:1fr}
+    .sidebar{position:static;height:auto}
+    main{padding:22px 20px 48px}
+    .thead,.trow{grid-template-columns:minmax(0,1fr) 110px}
+    .thead span:nth-child(3),.trow .act{display:none}
+    .summary{flex-direction:column;align-items:flex-start}
+    .summary .right{text-align:left}
+  }
+</style>
+</head>
+<body>
+<div class="titlebar">
+  <div class="tb-name"><span class="tb-mark"></span><b>GD Quiet</b> <span>Screen Muter</span></div>
+  <div class="tb-controls"><span>&#8212;</span><span>&#9633;</span><span class="close">&#10005;</span></div>
+</div>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="logo">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3.2L12 18.5v-13L7.2 9.5H4z"/><path d="M16.5 9l4 6M20.5 9l-4 6"/></svg>
+      </span>
+      <span>
+        <span class="name">GD Quiet</span><br />
+        <span class="sub">SCREEN MUTER</span>
+      </span>
+    </div>
+
+    <div class="navlabel">WORKSPACE</div>
+    <nav>
+      <a href="gd-quiet-overview.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg>Overview</a>
+      <a class="on" href="gd-quiet-apps.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3.2L12 18.5v-13L7.2 9.5H4z"/><path d="M16.5 9l4 6M20.5 9l-4 6"/></svg>Apps to mute<span class="badge">4</span></a>
+      <a href="gd-quiet-deafen.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 14.5v-2.5a8 8 0 0 1 16 0v2.5"/><rect x="2.4" y="13.6" width="4" height="6.2" rx="2"/><rect x="17.6" y="13.6" width="4" height="6.2" rx="2"/></svg>Discord auto-deafen</a>
+      <a href="gd-quiet-capture.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="2.6" y="4" width="18.8" height="12.6" rx="2"/><path d="M9 20.6h6M12 16.6v4"/></svg>Screen capture</a>
+      <a href="gd-quiet-settings.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.6v3M12 18.4v3M2.6 12h3M18.4 12h3M5.4 5.4l2.1 2.1M16.5 16.5l2.1 2.1M18.6 5.4l-2.1 2.1M7.5 16.5l-2.1 2.1"/></svg>Settings</a>
+    </nav>
+
+    <div class="watcher">
+      <div class="watcher-head"><span class="dot"></span>WATCHER PAUSED</div>
+      <div class="watcher-pct">-- %</div>
+      <div class="watcher-sub">Waiting for a run</div>
+      <input type="range" min="0" max="100" value="59" style="--fill:59%;margin-top:10px" aria-label="Mute threshold" />
+      <div class="watcher-thresh">Mute threshold</div>
+    </div>
+
+    <div class="sidebar-foot">
+      <button class="btn primary block">Resume watching <kbd>F6</kbd></button>
+      <a class="link" href="#">Unmute &amp; undeafen all</a>
+      <div class="ver">
+        <span>v4.0.0</span>
+        <a href="#">Check for updates
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M7 17 17 7M9 7h8v8"/></svg>
+        </a>
+      </div>
+    </div>
+  </aside>
+
+  <main>
+    <div class="topbar">
+      <div>
+        <div class="crumb">GD QUIET / APPS TO MUTE</div>
+        <h1>Apps to mute</h1>
+        <p class="lead">Select the apps to mute during a run.</p>
+      </div>
+      <span class="saved"><span class="dot"></span>Settings saved</span>
+    </div>
+
+    <div class="card summary">
+      <div>
+        <h2>4 apps selected</h2>
+        <p>These apps will mute after 59%. Their audio returns when the run ends.</p>
+      </div>
+      <div class="right">
+        <b>59%</b>
+        <span>MUTE THRESHOLD</span>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <div class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4.2-4.2" stroke-linecap="round"/></svg>
+        <input type="search" placeholder="Search apps or windows" aria-label="Search apps or windows" />
+      </div>
+      <label class="check"><input type="checkbox" />Show background audio</label>
+      <button class="btn ghost">Refresh windows</button>
+      <button class="btn ghost">Clear all</button>
+    </div>
+
+    <div class="list">
+      <div class="thead">
+        <span>APPLICATION</span>
+        <span>AUDIO STATUS</span>
+        <span>ACTION</span>
+      </div>
+
+      <div class="trow">
+        <div class="app-cell">
+          <span class="tile t-discord">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.7" stroke-linejoin="round"><path d="M20 5.5A15 15 0 0 0 16.4 4l-.4 1a12 12 0 0 0-8 0L7.6 4A15 15 0 0 0 4 5.5C2 9 1.4 12.6 1.8 16a15 15 0 0 0 4.6 2.3l.9-1.6a9 9 0 0 1-1.5-.8M22.2 16c-.4-3.4-1-7-2.2-10.5"/><path d="M8.5 12.5c0 .8.4 1.3 1 1.3s1-.5 1-1.3-.4-1.3-1-1.3-1 .5-1 1.3zm5 0c0 .8.4 1.3 1 1.3s1-.5 1-1.3-.4-1.3-1-1.3-1 .5-1 1.3z" fill="#fff" stroke="none"/></svg>
+          </span>
+          <div style="min-width:0">
+            <div class="app-name">Discord</div>
+            <div class="app-exe">discord.exe</div>
+            <div class="app-win">@Jacob · Discord</div>
+          </div>
+        </div>
+        <div><span class="pill active"><span class="dot"></span>Audio active</span></div>
+        <button class="act">Will mute</button>
+      </div>
+
+      <div class="trow">
+        <div class="app-cell">
+          <span class="tile t-chrome">
+            <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#4285f4" stroke-width="2"/><circle cx="12" cy="12" r="3.4" fill="#4285f4"/><path d="M12 8.6h7.8M9 14l-3.9 6.6M15 14l-3.9 6.6" stroke="#4285f4" stroke-width="1.6"/></svg>
+          </span>
+          <div style="min-width:0">
+            <div class="app-name">Google Chrome</div>
+            <div class="app-exe">chrome.exe</div>
+            <div class="app-win">Home - Extreme Demon Gacha - Google Chrome</div>
+          </div>
+        </div>
+        <div><span class="pill active"><span class="dot"></span>Audio active</span></div>
+        <button class="act">Will mute</button>
+      </div>
+
+      <div class="trow">
+        <div class="app-cell">
+          <span class="tile t-obs">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#e5e5e7" stroke-width="1.7" stroke-linejoin="round"><path d="M12 2.6 21 7.6v8.8L12 21.4 3 16.4V7.6z"/><path d="M12 8.4 16.6 11v4.6L12 18.2 7.4 15.6V11z"/></svg>
+          </span>
+          <div style="min-width:0">
+            <div class="app-name">OBS Studio</div>
+            <div class="app-exe">obs64.exe</div>
+            <div class="app-win">OBS 33.0.3 - Profile: Untitled - Scenes: Untitled</div>
+          </div>
+        </div>
+        <div><span class="pill active"><span class="dot"></span>Audio active</span></div>
+        <button class="act">Will mute</button>
+      </div>
+
+      <div class="trow">
+        <div class="app-cell">
+          <span class="tile t-explorer">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#facc15" stroke-width="1.7" stroke-linejoin="round"><path d="M3 7.4c0-.8.6-1.4 1.4-1.4h4l2 2.2h8.2c.8 0 1.4.6 1.4 1.4v8.4c0 .8-.6 1.4-1.4 1.4H4.4c-.8 0-1.4-.6-1.4-1.4z"/></svg>
+          </span>
+          <div style="min-width:0">
+            <div class="app-name">Explorer</div>
+            <div class="app-exe">explorer.exe</div>
+            <div class="app-win">GD 2.208 + GEODE PRE-BUILD - File Explorer</div>
+          </div>
+        </div>
+        <div><span class="pill window">Window only</span></div>
+        <button class="act">Will mute</button>
+      </div>
+    </div>
+
+    <div class="list-foot">
+      <span>4 windows found</span>
+      <span>Selections are saved automatically</span>
+    </div>
+
+    <div class="never">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 2.8 4 6v6c0 4.6 3.3 8.2 8 9.2 4.7-1 8-4.6 8-9.2V6z"/><path d="M8.6 12.2l2.4 2.4 4.4-4.6"/></svg>
+      <div>
+        <b>Geometry Dash is never muted</b>
+        <p>GD Quiet only changes audio for your selected apps. Geometry Dash is never muted or controlled.</p>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+  document.querySelectorAll('.toggle').forEach(function (t) {
+    t.addEventListener('click', function () { t.classList.toggle('on'); });
+  });
+</script>
+</body>
+</html>
