@@ -20,7 +20,7 @@ jobs:
         run: python -c "import json, os, re; from pathlib import Path; ver = os.environ['RELEASE_TAG'].lstrip('vV'); p = Path('app/updater.py'); p.write_text(re.sub(r'^APP_VERSION = .*$', 'APP_VERSION = ' + json.dumps(ver), p.read_text(encoding='utf-8'), flags=re.M), encoding='utf-8')"
       - run: python -m unittest discover -s tests -v
       - name: Build GDQuiet.exe
-        run: pyinstaller --onefile --noconsole --name GDQuiet --icon app/assets/gdquiet.ico --add-data "logo.png;." --add-data "app/assets/gdquiet.ico;assets" --paths app --collect-submodules winrt --collect-binaries winrt --collect-data winrt --collect-submodules pystray --hidden-import=PIL._tkinter_finder app/gdquiet.py
+        run: pyinstaller --onefile --noconsole --name GDQuiet --icon app/assets/gdquiet.ico --add-data "logo.png;." --add-data "app/assets/gdquiet.ico;assets" --add-data "app/ui;ui" --paths app --collect-submodules winrt --collect-binaries winrt --collect-data winrt --collect-submodules pystray --collect-submodules webview --collect-data webview --collect-submodules pythonnet --collect-submodules clr_loader --hidden-import=PIL._tkinter_finder app/gdquiet.py
       - name: Build GDQuiet-Setup.exe Wizard
         shell: pwsh
         env:

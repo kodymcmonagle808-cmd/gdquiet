@@ -4429,9 +4429,15 @@ def main() -> None:
     except Exception:
         pass
 
-    root = tk.Tk()
-    GDQuietApp(root)
-    root.mainloop()
+    if "--tk" in sys.argv:
+        root = tk.Tk()
+        GDQuietApp(root)
+        root.mainloop()
+        return
+
+    from web_ui import run_web_app
+
+    run_web_app()
 
 
 if __name__ == "__main__":

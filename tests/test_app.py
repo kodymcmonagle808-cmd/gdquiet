@@ -1266,6 +1266,66 @@ class GDQuietTests(unittest.TestCase):
                 app._apply_cond.notify_all()
             worker.join(timeout=1.0)
 
+    def test_web_ui_has_no_presets_and_wires_actions(self) -> None:
+        import web_ui
+
+        repo_root = Path(__file__).resolve().parent.parent
+        html = (repo_root / "app" / "ui" / "index.html").read_text(encoding="utf-8")
+        js = (repo_root / "app" / "ui" / "app.js").read_text(encoding="utf-8")
+
+        # Ensure mockup preset values were removed from the HTML/JS templates
+        for preset_marker in (
+            "@Jacob",
+            "Extreme Demon Gacha",
+            "GEODE PRE-BUILD",
+            "Kody McMonagle",
+            "4 apps selected",
+            "59% THRESHOLD",
+            "v4.0.0",
+        ):
+            self.assertNotIn(preset_marker, html)
+            self.assertNotIn(preset_marker, js)
+
+        with (
+            patch.object(web_ui, "load_config", return_value=dict(config.DEFAULT_CONFIG)),
+            patch.object(web_ui, "save_config"),
+            patch.object(web_ui, "list_mute_targets", return_value=[]),
+            patch.object(web_ui, "list_open_window_processes", return_value=["geometrydash.exe"]),
+            patch.object(web_ui, "ScreenPercentWatcher") as mock_watcher,
+        ):
+            app = web_ui.GDQuietWebApp()
+            try:
+                mock_watcher.return_value.start.assert_called_once()
+                api = web_ui.WebApi(app)
+                st = api.get_state()
+                self.assertEqual(st["cfg"]["mute_at_percent"], 50.0)
+                self.assertEqual(st["cfg"]["selected_apps"], [])
+                self.assertIsNone(st["cfg"]["deafen_hotkey"])
+                self.assertIsNone(st["cfg"]["watch_toggle_hotkey"])
+                self.assertEqual(st["app_version"], updater.APP_VERSION)
+
+                st = api.set_threshold(72)
+                self.assertEqual(st["cfg"]["mute_at_percent"], 72.0)
+
+                st = api.toggle_app("discord.exe")
+                self.assertEqual(st["cfg"]["selected_apps"], ["discord.exe"])
+
+                st = api.set_region_preset("Top Left")
+                self.assertEqual(st["cfg"]["watch_mode"], "custom_region")
+                self.assertEqual(st["region_description"], "Preset: Top Left")
+
+                st = api.toggle_screen_test()
+                self.assertTrue(st["test"]["active"])
+                st = api.toggle_screen_test()
+                self.assertFalse(st["test"]["active"])
+                self.assertTrue(st["test"]["completed"])
+
+                st = api.reset_defaults()
+                self.assertEqual(st["cfg"]["mute_at_percent"], config.DEFAULT_CONFIG["mute_at_percent"])
+                self.assertEqual(st["cfg"]["selected_apps"], [])
+            finally:
+                app._cleanup_sync()
+
 
 if __name__ == "__main__":
     unittest.main()
