@@ -14,13 +14,9 @@ from functools import cmp_to_key
 from pathlib import Path
 from typing import Callable
 
-APP_VERSION = "4.5.2"
+APP_VERSION = "4.5.3"
 PATCH_NOTES = """\
-- New: when GD Quiet reads a level you've switched on (matched by level ID), it turns watching on and uses that level's %
-- New: "Auto-add levels" setting (Levels tab and Settings). Levels you play get added with their name and ID, switched off and with an empty % until you set one
-- New: search bar on the Levels tab (search by name or ID)
-- A level's % can be left empty; it then keeps your current %
-- Unknown levels are no longer saved automatically unless Auto-add levels is on
+- Fixed: patch notes in the update banner now show as a proper list with headings instead of raw text like "###" and "-"
 """.strip()
 GITHUB_REPO = "kodymcmonagle808-cmd/gdquiet"
 RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
