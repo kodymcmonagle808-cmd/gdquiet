@@ -1528,6 +1528,131 @@ class GDQuietTests(unittest.TestCase):
             finally:
                 app._cleanup_sync()
 
+    def test_level_scanner_runs_while_muting_is_paused_and_skips_covered_game(self) -> None:
+        import threading
+        import time
+
+        results: list[tuple] = []
+        got = threading.Event()
+
+        def on_level(candidate, raw, error, status="ok"):
+            results.append((candidate, raw, error, status))
+            if len(results) >= 3:
+                got.set()
+
+        cfg = {"watch_enabled": False, "level_label_enabled": True, "target_process": "geometrydash.exe"}
+        watcher = screen_reader.ScreenPercentWatcher(
+            get_settings=lambda: cfg, on_reading=lambda _r: None, on_level_result=on_level
+        )
+        scans = iter(
+            [
+                ("clubstep startpos", "clubstep startpos", "ok"),
+                (None, None, "covered"),
+                ("clubstep startpos", "clubstep startpos", "ok"),
+            ]
+        )
+
+        class FakeMss:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_a):
+                return False
+
+        with (
+            patch.object(screen_reader.mss, "MSS", FakeMss),
+            patch.object(
+                screen_reader.ScreenPercentWatcher,
+                "_scan_level_label",
+                staticmethod(lambda *_a: next(scans, (None, None, "no_window"))),
+            ),
+            patch.object(screen_reader.ScreenPercentWatcher, "_run", lambda self: None),
+        ):
+            orig_wait = watcher._stop.wait
+            watcher._stop.wait = lambda t=None: orig_wait(0.01)
+            watcher.start()
+            try:
+                self.assertTrue(got.wait(5.0))
+            finally:
+                watcher.stop()
+                time.sleep(0.05)
+        statuses = [r[3] for r in results[:3]]
+        self.assertEqual(statuses, ["ok", "covered", "ok"])
+        # The covered scan didn't break the run: the second good read reports the level.
+        self.assertIsNone(results[0][0])
+        self.assertEqual(results[2][0], "clubstep startpos")
+
+    def test_scan_level_label_refuses_covered_game_window(self) -> None:
+        rect = {"left": 0, "top": 0, "width": 200, "height": 40}
+        with (
+            patch.object(screen_reader, "compute_region_rect", return_value=(rect, "geometrydash.exe")),
+            patch.object(screen_reader, "region_shows_process", return_value=False),
+        ):
+            name, raw, status = screen_reader.ScreenPercentWatcher._scan_level_label(
+                None, None, None, "geometrydash.exe"
+            )
+        self.assertEqual((name, raw, status), (None, None, "covered"))
+        with patch.object(screen_reader, "compute_region_rect", return_value=(None, "Waiting")):
+            self.assertEqual(
+                screen_reader.ScreenPercentWatcher._scan_level_label(None, None, None, "geometrydash.exe"),
+                (None, None, "no_window"),
+            )
+
+    def test_web_ui_level_detection_status_and_test_button(self) -> None:
+        import web_ui
+        from PIL import Image as PILImage
+
+        cfg = dict(config.DEFAULT_CONFIG)
+        cfg["watch_enabled"] = False
+        cfg["level_label_enabled"] = True
+        with (
+            patch.object(web_ui, "load_config", return_value=cfg),
+            patch.object(web_ui, "save_config"),
+            patch.object(web_ui, "list_mute_targets", return_value=[]),
+            patch.object(web_ui, "list_open_window_processes", return_value=["geometrydash.exe"]),
+            patch.object(web_ui, "ScreenPercentWatcher"),
+            patch.object(web_ui.DiscordAuth, "load"),
+        ):
+            app = web_ui.GDQuietWebApp()
+            try:
+                api = web_ui.WebApi(app)
+                api.add_level("clubstep startpos", 70)
+
+                # Results from the label thread load profiles even with muting paused.
+                app._on_level_result(None, None, None, "no_window")
+                self.assertEqual(api.get_state()["level_label"]["scan_status"], "Waiting for Geometry Dash to open")
+                app._on_level_result(None, None, None, "covered")
+                self.assertIn("covering Geometry Dash", api.get_state()["level_label"]["scan_status"])
+                app._on_level_result("slubStep Startpos", "slubStep Startpos", None, "ok")
+                st = api.get_state()
+                self.assertEqual(st["level_label"]["active_level"], "clubstep startpos")
+                self.assertEqual(st["cfg"]["mute_at_percent"], 70.0)
+                self.assertIn("muting is paused", st["level_label"]["scan_status"])
+
+                img =PILImage.new("RGB", (271, 61), (20, 120, 40))
+                with patch.object(
+                    web_ui,
+                    "probe_level_label",
+                    return_value=screen_reader.LevelLabelProbe("c!ubstep startpos", "c!ubstep startpos", img),
+                ):
+                    st = api.test_level_detection()
+                test = st["level_label"]["test"]
+                self.assertTrue(test["ok"])
+                self.assertEqual(test["matched_name"], "clubstep startpos")
+                self.assertTrue(test["matched_enabled"])
+                self.assertTrue(test["preview"].startswith("data:image/png;base64,"))
+
+                with patch.object(
+                    web_ui,
+                    "probe_level_label",
+                    return_value=screen_reader.LevelLabelProbe(None, "", None, "Another window is covering Geometry Dash"),
+                ):
+                    st = api.test_level_detection()
+                self.assertFalse(st["level_label"]["test"]["ok"])
+                self.assertIn("covering", st["level_label"]["test"]["problem"])
+            finally:
+                app._cleanup_sync()
+
     def test_web_ui_turns_off_saved_beta_updates_on_start(self) -> None:
         import web_ui
 

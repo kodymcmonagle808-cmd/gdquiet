@@ -494,6 +494,26 @@
 
           <div class="stack">
             <div class="panel-group">
+              <div class="panel-title">Detection</div>
+              <div class="panel pad">
+                <div class="lvl-status"><span class="dot" id="lvl-status-dot"></span><span id="lvl-status-txt">Starting…</span></div>
+                <div class="lvl-detected">
+                  <span>Detected level:</span> <strong id="lvl-active">None yet</strong>
+                </div>
+                <div class="custom" style="margin-top:10px">
+                  <button type="button" class="btn primary sm" id="lvl-test-btn">Test detection</button>
+                </div>
+                <div class="lvl-test" id="lvl-test" hidden>
+                  <div class="lvl-test-head" id="lvl-test-head"></div>
+                  <img class="lvl-test-img" id="lvl-test-img" alt="What the label box sees" hidden />
+                  <div class="lvl-test-row"><span>Read:</span> <strong id="lvl-test-read"></strong></div>
+                  <div class="lvl-test-row" id="lvl-test-match-row"><span>Matches:</span> <strong id="lvl-test-match"></strong></div>
+                  <div class="ocr lvl-raw" id="lvl-test-raw"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel-group">
               <div class="panel-title">Set up the Eclipse label</div>
               <div class="panel pad">
                 <ol class="steps">
@@ -503,7 +523,7 @@
                   <li>Type <code>{levelName}</code> as the label text.</li>
                   <li>Play a level. The name appears on the left side of the screen and GD Quiet picks it up.</li>
                 </ol>
-                <div class="foot-note">Keep the label on the left side with Eclipse's other labels. Watching must be on for levels to be read.</div>
+                <div class="foot-note">Keep the label on the left side with Eclipse's other labels. Levels are read even while muting is paused.</div>
               </div>
             </div>
 
@@ -518,9 +538,6 @@
                 </div>
                 <div class="current">
                   <span>Label box:</span> <strong id="lvl-region-desc">Default · left 30% of the game window</strong>
-                </div>
-                <div class="lvl-detected">
-                  <span>Detected level:</span> <strong id="lvl-active">None yet</strong>
                 </div>
                 <div class="ocr lvl-raw" id="lvl-raw">Raw OCR: (waiting)</div>
               </div>

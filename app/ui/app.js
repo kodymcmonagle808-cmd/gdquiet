@@ -346,9 +346,47 @@
 
     $("lvl-region-desc").textContent = info.region_description || "Default · left 30% of the game window";
     $("lvl-active").textContent = info.active_level || "None yet";
+    const scan = info.scan_status || "Off";
+    $("lvl-status-txt").textContent = scan;
+    $("lvl-status-dot").className =
+      "dot " + (scan.startsWith("Scanning") ? "ok" : scan.startsWith("Scan error") ? "bad" : "wait");
+    renderLevelTest(info.test);
     const raw = (info.last_raw || "").replace(/\s+/g, " ").trim();
     $("lvl-raw").textContent = "Raw OCR: " + (raw ? raw.slice(0, 120) : on ? "(nothing read yet)" : "(off)");
     renderLevels(state.levels || []);
+  }
+
+  function renderLevelTest(test) {
+    const box = $("lvl-test");
+    if (!test) {
+      box.hidden = true;
+      return;
+    }
+    box.hidden = false;
+    box.classList.toggle("ok", Boolean(test.ok));
+    box.classList.toggle("bad", !test.ok);
+    let head;
+    if (!test.ok) head = test.problem || "Nothing detected.";
+    else if (test.matched_name && test.matched_enabled === false)
+      head = `Detected — matches "${test.matched_name}", but that level is switched off.`;
+    else if (test.matched_name) head = `Detected — this will load your "${test.matched_name}" settings.`;
+    else head = "Detected — not in your levels yet. It'll be added when you play it, or add it on the left.";
+    $("lvl-test-head").textContent = head;
+
+    const img = $("lvl-test-img");
+    if (test.preview) {
+      if (img.dataset.src !== test.preview) {
+        img.dataset.src = test.preview;
+        img.src = test.preview;
+      }
+      img.hidden = false;
+    } else {
+      img.hidden = true;
+    }
+    $("lvl-test-read").textContent = test.name || "—";
+    $("lvl-test-match-row").hidden = !test.ok;
+    $("lvl-test-match").textContent = test.matched_name || "No saved level";
+    $("lvl-test-raw").textContent = "Raw OCR: " + (test.raw || "(no text)");
   }
 
   function renderLevels(levels) {
@@ -877,6 +915,18 @@
     $("lvl-reset-btn").addEventListener("click", async () => {
       await mutate((a) => a.reset_level_region());
       flashSaved();
+    });
+
+    $("lvl-test-btn").addEventListener("click", async () => {
+      const btn = $("lvl-test-btn");
+      btn.disabled = true;
+      btn.textContent = "Testing…";
+      try {
+        await mutate((a) => a.test_level_detection());
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Test detection";
+      }
     });
 
     // Levels list

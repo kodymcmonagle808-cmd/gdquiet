@@ -35,6 +35,7 @@ from screen_reader import (
     ScreenReading,
     ScreenTestSession,
     find_window_client_rect,
+    probe_level_label,
 )
 from updater import (
     APP_VERSION,
@@ -272,6 +273,9 @@ class GDQuietWebApp:
 
         self._last_level_label_raw = ""
         self._level_detection_error = ""
+        self._level_scan_status = "idle"
+        self._last_level_scan_at = 0.0
+        self._level_test: dict[str, Any] | None = None
 
         self.auth = DiscordAuth(app_data_dir() / "session.bin")
         self.auth.load()
@@ -302,6 +306,7 @@ class GDQuietWebApp:
         self.watcher = ScreenPercentWatcher(
             get_settings=self._snapshot_cfg,
             on_reading=self._on_screen_reading,
+            on_level_result=self._on_level_result,
         )
         self.watcher.start()
 
@@ -655,6 +660,8 @@ class GDQuietWebApp:
                 "region_description": level_region_desc,
                 "last_raw": self._last_level_label_raw,
                 "active_level": self._active_level_name,
+                "scan_status": self._level_scan_status_text(cfg_copy),
+                "test": self._level_test,
             },
             "account": self.auth.to_state(),
             "levels": self._levels_state(cfg_copy),
@@ -760,6 +767,9 @@ class GDQuietWebApp:
                 self._active_level_key = ""
                 self._last_level_label_raw = ""
                 self._level_detection_error = ""
+                self._level_scan_status = "idle"
+                self._last_level_scan_at = 0.0
+                self._level_test = None
 
         return self.get_state()
 
@@ -1191,6 +1201,85 @@ class GDQuietWebApp:
 
     # ---- Screen Reading & Audio Pipeline ----
 
+    def _on_level_result(
+        self, candidate: str | None, raw: str | None, error: str | None, status: str = "ok"
+    ) -> None:
+        """Called by the level-label thread after each scan (runs even while muting is paused)."""
+        if self._closing or not self.cfg.get("level_label_enabled", False):
+            return
+        if error:
+            self._level_detection_error = error
+            self._level_scan_status = "error"
+        elif status == "covered":
+            self._level_scan_status = "covered"
+        elif raw is None:
+            self._level_scan_status = "no_window"
+        else:
+            self._last_level_label_raw = raw.strip()
+            self._level_detection_error = ""
+            self._level_scan_status = "scanning"
+            self._last_level_scan_at = time.time()
+        level_name = (candidate or "").strip()
+        if level_name:
+            with self.cfg_lock:
+                profiles = dict(self.cfg.get("level_profiles") or {})
+            key = find_matching_profile(profiles, level_name) or profile_key(level_name)
+            if key and key != self._active_level_key:
+                self._activate_level_profile(level_name, key)
+                self._footer_message = f"Level detected: {self._active_level_name}"
+
+    def _level_scan_status_text(self, cfg_copy: dict[str, Any]) -> str:
+        if not cfg_copy.get("level_label_enabled", False):
+            return "Off"
+        if self._level_scan_status == "no_window":
+            return "Waiting for Geometry Dash to open"
+        if self._level_scan_status == "covered":
+            return "Paused: another window is covering Geometry Dash"
+        if self._level_scan_status == "error":
+            return f"Scan error: {self._level_detection_error[:80]}"
+        if self._last_level_scan_at:
+            ago = max(0, int(time.time() - self._last_level_scan_at))
+            paused = "" if cfg_copy.get("watch_enabled", True) else " (muting is paused, levels still load)"
+            return f"Scanning every second · last scan {ago}s ago{paused}"
+        return "Starting…"
+
+    def test_level_detection(self) -> dict[str, Any]:
+        """One-off scan of the label box for the Levels tab's Test button."""
+        with self.cfg_lock:
+            region = self.cfg.get("level_label_region")
+            target = str(self.cfg.get("target_process") or "geometrydash.exe")
+            profiles = dict(self.cfg.get("level_profiles") or {})
+        try:
+            probe = probe_level_label(region, target)
+        except Exception as exc:
+            self._level_test = {"ok": False, "problem": f"Test failed: {exc}", "at": time.time()}
+            return self.get_state()
+
+        match_key = find_matching_profile(profiles, probe.name) if probe.name else None
+        match = profiles.get(match_key) if match_key else None
+        preview = None
+        if probe.image is not None:
+            try:
+                img = probe.image
+                if img.width > 520:
+                    img = img.resize((520, max(1, int(img.height * 520 / img.width))))
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                preview = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+            except Exception:
+                preview = None
+        self._level_test = {
+            "ok": bool(probe.name),
+            "name": probe.name or "",
+            "raw": probe.raw_text,
+            "problem": probe.problem,
+            "matched_name": str(match.get("name") or match_key) if isinstance(match, dict) else "",
+            "matched_enabled": profile_enabled(match) if isinstance(match, dict) else None,
+            "preview": preview,
+            "at": time.time(),
+        }
+        return self.get_state()
+
     def _on_screen_reading(self, reading: ScreenReading) -> None:
         if self._closing:
             return
@@ -1202,20 +1291,11 @@ class GDQuietWebApp:
                     self.test_session.stop()
                     testing = False
 
-        if self.cfg.get("level_label_enabled", False):
-            if reading.level_label_raw is not None:
-                self._last_level_label_raw = reading.level_label_raw.strip()
-                self._level_detection_error = ""
-            if reading.level_detection_error:
-                self._level_detection_error = reading.level_detection_error
-            level_name = (reading.level_name_candidate or "").strip()
-            if level_name:
-                with self.cfg_lock:
-                    profiles = dict(self.cfg.get("level_profiles") or {})
-                key = find_matching_profile(profiles, level_name) or profile_key(level_name)
-                if key and key != self._active_level_key:
-                    self._activate_level_profile(level_name, key)
-                    self._footer_message = f"Level detected: {self._active_level_name}"
+        # Level-label results normally arrive via _on_level_result; this path is a fallback.
+        if reading.level_name_candidate or reading.level_label_raw is not None or reading.level_detection_error:
+            self._on_level_result(
+                reading.level_name_candidate, reading.level_label_raw, reading.level_detection_error
+            )
 
         with self.cfg_lock:
             watch_enabled = bool(self.cfg.get("watch_enabled", True))
@@ -1786,6 +1866,9 @@ class WebApi:
 
     def delete_level(self, key: str) -> dict[str, Any]:
         return self._app.delete_level(key)
+
+    def test_level_detection(self) -> dict[str, Any]:
+        return self._app.test_level_detection()
 
     def discord_sign_in(self) -> dict[str, Any]:
         return self._app.discord_sign_in()

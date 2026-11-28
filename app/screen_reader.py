@@ -134,6 +134,42 @@ def _window_belongs_to_process(hwnd: int, target_lower: str) -> bool:
         return False
 
 
+_GA_ROOT = 2
+user32.WindowFromPoint.argtypes = [POINT]
+user32.WindowFromPoint.restype = wintypes.HWND
+user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+user32.GetAncestor.restype = wintypes.HWND
+
+
+def region_shows_process(rect: dict[str, int], process_name: str) -> bool:
+    """True when the window actually visible at the region is the target process.
+
+    Screen capture reads whatever is on top, so if another window covers the
+    game we'd OCR that window instead (e.g. a video title becoming a "level").
+    Samples a few points so a small overlay doesn't count as covering it.
+    """
+    target = (process_name or "").strip().lower()
+    if not target:
+        return False
+    left, top = int(rect["left"]), int(rect["top"])
+    width, height = max(1, int(rect["width"])), max(1, int(rect["height"]))
+    points = [
+        (left + width // 2, top + height // 2),
+        (left + width // 4, top + height // 2),
+        (left + (3 * width) // 4, top + height // 2),
+    ]
+    hits = 0
+    for x, y in points:
+        try:
+            hwnd = user32.WindowFromPoint(POINT(x, y))
+            root = user32.GetAncestor(hwnd, _GA_ROOT) if hwnd else 0
+            if root and _window_belongs_to_process(root, target):
+                hits += 1
+        except Exception:
+            return True  # Can't tell; don't block scanning.
+    return hits * 2 > len(points)
+
+
 def find_window_client_rect(process_name: str) -> tuple[int, int, int, int] | None:
     target = (process_name or "").strip().lower()
     if not target:
@@ -795,6 +831,70 @@ class ScreenTestSession:
         )
 
 
+@dataclass
+class LevelLabelProbe:
+    """Result of a one-off "Test detection" scan of the level-label box."""
+
+    name: str | None
+    raw_text: str
+    image: Image.Image | None
+    problem: str = ""
+
+
+def probe_level_label(region: dict[str, Any] | None, target_process: str, scans: int = 3) -> LevelLabelProbe:
+    """Scan the label box a few times right now and report what was read.
+
+    Runs on the calling thread with its own OCR engine. The name is the read
+    that agrees with the most other reads, so one bad frame doesn't decide it.
+    """
+    ocr = WinRtPercentOcr()
+    try:
+        if not ocr.available():
+            return LevelLabelProbe(None, "", None, "Windows OCR isn't available. Install an OCR language pack in Windows settings.")
+        reg = region if isinstance(region, dict) and region.get("kind") else DEFAULT_LEVEL_LABEL_REGION
+        resolved = compute_region_rect(reg, target_process)
+        if resolved is None or resolved[0] is None:
+            return LevelLabelProbe(None, "", None, f"Geometry Dash ({target_process}) isn't open, or its window can't be found.")
+        covered = not region_shows_process(resolved[0], target_process)
+        names: list[str] = []
+        raws: list[str] = []
+        image: Image.Image | None = None
+        with mss.MSS() as sct:
+            for i in range(max(1, scans)):
+                shot = sct.grab(resolved[0])
+                img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+                if image is None:
+                    image = img
+                big, scale = prepare_label_image(img)
+                lines = ocr.recognize_line_boxes(big, scale=scale)
+                raws.append(" | ".join(line.text for line in lines))
+                name = pick_level_name(lines, align_tolerance=max(10.0, img.width * 0.02))
+                if name:
+                    names.append(name)
+                if i + 1 < scans:
+                    time.sleep(0.15)
+        raw = next((r for r in raws if r), "")
+        if covered:
+            return LevelLabelProbe(
+                None,
+                raw,
+                image,
+                "Another window is covering Geometry Dash where the label is. Bring the game to the front "
+                "(or move the other window), then test again. Levels aren't read while the game is covered.",
+            )
+        if not names:
+            problem = (
+                "Text was found, but none of it looks like a level name."
+                if raw
+                else "No text found in the box. Make sure the {levelName} label is showing and the box covers it."
+            )
+            return LevelLabelProbe(None, raw, image, problem)
+        best = max(names, key=lambda n: sum(level_name_similarity(n, other) >= LevelNameTracker.SIMILAR for other in names))
+        return LevelLabelProbe(best, raw, image)
+    finally:
+        ocr.close()
+
+
 class ScreenPercentWatcher:
     """Background loop capturing the GD window or screen region and running Windows OCR."""
 
@@ -802,9 +902,13 @@ class ScreenPercentWatcher:
         self,
         get_settings: Callable[[], dict[str, Any]],
         on_reading: Callable[[ScreenReading], None],
+        on_level_result: Callable[[str | None, str | None, str | None, str], None] | None = None,
     ) -> None:
+        """`on_level_result(candidate, raw_text, error, status)` is called from the level-label
+        thread after every scan. Without it, results ride along on the next ScreenReading."""
         self._get_settings = get_settings
         self._on_reading = on_reading
+        self._on_level_result = on_level_result
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._debouncer = PercentStateDebouncer()
@@ -870,25 +974,36 @@ class ScreenPercentWatcher:
         ocr: WinRtPercentOcr,
         region: dict[str, Any] | None,
         target_process: str,
-    ) -> tuple[str | None, str | None]:
+    ) -> tuple[str | None, str | None, str]:
         """OCR the Eclipse level-name label box.
 
-        Returns (level name or None, raw OCR text). Raw text is None when the
-        game window isn't available.
+        Returns (level name or None, raw OCR text or None, status) where status is
+        "ok", "no_window" (game not found) or "covered" (another window is on top
+        of the label box, so its text must not be read as a level name).
         """
         reg = region if isinstance(region, dict) and region.get("kind") else DEFAULT_LEVEL_LABEL_REGION
         resolved = compute_region_rect(reg, target_process)
         if resolved is None or resolved[0] is None:
-            return None, None
+            return None, None, "no_window"
+        if not region_shows_process(resolved[0], target_process):
+            return None, None, "covered"
         shot = sct.grab(resolved[0])
         img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
         big, scale = prepare_label_image(img)
         lines = ocr.recognize_line_boxes(big, scale=scale)
         raw = "\n".join(line.text for line in lines)
         tolerance = max(10.0, img.width * 0.02)
-        return pick_level_name(lines, align_tolerance=tolerance), raw
+        return pick_level_name(lines, align_tolerance=tolerance), raw, "ok"
 
-    def _post_level_result(self, candidate: str | None, raw: str | None, error: str | None) -> None:
+    def _post_level_result(
+        self, candidate: str | None, raw: str | None, error: str | None, status: str = "ok"
+    ) -> None:
+        if self._on_level_result is not None:
+            try:
+                self._on_level_result(candidate, raw, error, status)
+            except Exception:
+                pass
+            return
         with self._level_lock:
             if candidate:
                 self._level_pending_candidate = candidate
@@ -909,30 +1024,35 @@ class ScreenPercentWatcher:
 
         It has its own OCR engine and screen grabber so the ~100 ms label scan
         never delays the percentage loop (and therefore never delays a mute).
+        It runs whenever the level-label feature is on, even while % watching /
+        muting is paused, so level profiles keep loading.
         """
         ocr = WinRtPercentOcr()
         try:
             with mss.MSS() as sct:
                 while not self._stop.is_set():
                     cfg = self._get_settings()
-                    if (
-                        not cfg.get("watch_enabled", True)
-                        or not cfg.get("level_label_enabled", False)
-                        or not ocr.available()
-                    ):
+                    if not cfg.get("level_label_enabled", False) or not ocr.available():
                         self._level_name_tracker.reset()
                         self._stop.wait(0.5)
                         continue
                     target_process = str(cfg.get("target_process") or "geometrydash.exe")
                     try:
-                        title, raw = self._scan_level_label(sct, ocr, cfg.get("level_label_region"), target_process)
+                        title, raw, status = self._scan_level_label(
+                            sct, ocr, cfg.get("level_label_region"), target_process
+                        )
                     except Exception as exc:
-                        self._post_level_result(None, None, str(exc))
+                        self._post_level_result(None, None, str(exc), "error")
                     else:
-                        if raw is None:
+                        if status == "no_window":
                             # Game window closed: re-arm so reopening the level reloads its profile.
                             self._level_name_tracker.reset()
-                        self._post_level_result(self._level_name_tracker.update(title), raw, None)
+                            self._post_level_result(None, None, None, status)
+                        elif status == "covered":
+                            # Don't feed the tracker; whatever is on top isn't the game.
+                            self._post_level_result(None, None, None, status)
+                        else:
+                            self._post_level_result(self._level_name_tracker.update(title), raw, None, status)
                     self._stop.wait(1.0)
         finally:
             ocr.close()
