@@ -618,7 +618,7 @@ class GDQuietWebApp:
         )
         level_region = cfg_copy.get("level_label_region")
         if isinstance(level_region, dict) and level_region.get("kind"):
-            level_region_desc = "Custom box"
+            level_region_desc = "Custom box (also checks above and below it)"
         else:
             level_region_desc = "Default · left 30% of the game window"
 

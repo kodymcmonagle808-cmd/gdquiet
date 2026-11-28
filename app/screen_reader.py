@@ -170,6 +170,74 @@ def region_shows_process(rect: dict[str, int], process_name: str) -> bool:
     return hits * 2 > len(points)
 
 
+def point_shows_process(x: int, y: int, process_name: str, cache: dict[int, bool] | None = None) -> bool:
+    """True when the window visible at screen point (x, y) belongs to `process_name`."""
+    target = (process_name or "").strip().lower()
+    try:
+        hwnd = user32.WindowFromPoint(POINT(int(x), int(y)))
+        root = user32.GetAncestor(hwnd, _GA_ROOT) if hwnd else 0
+    except Exception:
+        return True  # can't tell; don't drop the line
+    if not root:
+        return False
+    key = int(root)
+    if cache is not None and key in cache:
+        return cache[key]
+    result = _window_belongs_to_process(root, target)
+    if cache is not None:
+        cache[key] = result
+    return result
+
+
+def level_label_scan_area(
+    region: dict[str, Any] | None, target_process: str
+) -> tuple[dict[str, int] | None, float | None]:
+    """Screen area to OCR for the level label, plus the preferred line centre (area y).
+
+    With no custom box: the left 30% of the game window, top-most label wins.
+    With a custom box: the box is a hint, not a crop. Eclipse's label stack moves
+    up and down between levels (different labels show), and "{levelName}
+    ({levelID})" can be wider than the box, so we scan the full height of the
+    game window from the box's left edge, at least 35% of the window wide, and
+    prefer the label line closest to the middle of the box.
+    """
+    custom = isinstance(region, dict) and bool(region.get("kind"))
+    reg = region if custom else DEFAULT_LEVEL_LABEL_REGION
+    resolved = compute_region_rect(reg, target_process)
+    if resolved is None or resolved[0] is None:
+        return None, None
+    rect = resolved[0]
+    if not custom:
+        return rect, None
+    win = find_window_client_rect(target_process)
+    if win is None:
+        return rect, rect["height"] / 2.0
+    wx, wy, ww, wh = win
+    left = max(wx, min(rect["left"], wx + ww - 24))
+    right = min(wx + ww, max(rect["left"] + rect["width"], left + int(ww * 0.35)))
+    area = {"left": left, "top": wy, "width": max(24, right - left), "height": max(18, wh)}
+    prefer_y = rect["top"] + rect["height"] / 2.0 - wy
+    return area, prefer_y
+
+
+def read_level_label_lines(
+    sct: Any, ocr: "WinRtPercentOcr", area: dict[str, int], process_name: str
+) -> tuple[list[OcrLine], Image.Image]:
+    """OCR the area and drop lines that aren't drawn by the game (e.g. the
+    taskbar's weather text or another window on top). Coordinates are area-relative."""
+    shot = sct.grab(area)
+    img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+    big, scale = prepare_label_image(img)
+    lines = ocr.recognize_line_boxes(big, scale=scale)
+    cache: dict[int, bool] = {}
+    kept = [
+        line
+        for line in lines
+        if point_shows_process(area["left"] + int(line.x) + 3, area["top"] + int(line.cy), process_name, cache)
+    ]
+    return kept, img
+
+
 def find_window_client_rect(process_name: str) -> tuple[int, int, int, int] | None:
     target = (process_name or "").strip().lower()
     if not target:
@@ -373,11 +441,16 @@ def level_name_similarity(a: str, b: str) -> float:
 
 @dataclass
 class OcrLine:
-    """One OCR line with the left/top of its first word, in source-image pixels."""
+    """One OCR line with the left/top/height of its first word, in source-image pixels."""
 
     text: str
     x: float = 0.0
     y: float = 0.0
+    h: float = 0.0
+
+    @property
+    def cy(self) -> float:
+        return self.y + self.h / 2.0
 
 
 _OCR_LETTER_FIXES = str.maketrans({"+": "t", "|": "l", "!": "l", "1": "l", "0": "o", "4": "a", "@": "a", "5": "s", "$": "s"})
@@ -482,7 +555,9 @@ def format_level_label(name: str, level_id: str | None) -> str:
     return name
 
 
-def pick_level_name(lines: list[OcrLine], align_tolerance: float = 10.0) -> str | None:
+def pick_level_name(
+    lines: list[OcrLine], align_tolerance: float = 10.0, prefer_y: float | None = None
+) -> str | None:
     """Pick the level label from OCR lines of the Eclipse label region.
 
     Eclipse stacks its labels with a shared left edge. When stat labels (FPS,
@@ -494,8 +569,24 @@ def pick_level_name(lines: list[OcrLine], align_tolerance: float = 10.0) -> str 
 
     A "{levelName} ({levelID})" label is returned normalised as "name (id)";
     use split_level_id() to get the parts.
+
+    With `prefer_y`, the candidate whose vertical centre is closest to it wins
+    instead of the top-most one (used when the user drew a box: Eclipse's label
+    stack shifts up and down between levels, so we scan a taller strip and take
+    the line nearest the box).
     """
-    cleaned = [(OcrLine(_clean_label_line(line.text), line.x, line.y)) for line in lines]
+    candidates = level_label_candidates(lines, align_tolerance)
+    if not candidates:
+        return None
+    if prefer_y is None:
+        return candidates[0][0]
+    return min(candidates, key=lambda c: abs(c[1].cy - prefer_y))[0]
+
+
+def level_label_candidates(lines: list[OcrLine], align_tolerance: float = 10.0) -> list[tuple[str, OcrLine]]:
+    """Every OCR line that looks like a level label, top to bottom, as (label, line)."""
+    found: list[tuple[str, OcrLine]] = []
+    cleaned = [(OcrLine(_clean_label_line(line.text), line.x, line.y, line.h)) for line in lines]
     cleaned = [line for line in cleaned if line.text]
     stat_xs = sorted(line.x for line in cleaned if _is_label_stat_line(line.text) and re.search(r"[A-Za-z]", line.text))
     anchor_x: float | None = stat_xs[len(stat_xs) // 2] if stat_xs else None
@@ -509,11 +600,12 @@ def pick_level_name(lines: list[OcrLine], align_tolerance: float = 10.0) -> str 
                 continue
             if not name and len(level_id) < 4:
                 continue  # a lone "(2)" is noise, not a level
-            return format_level_label(name, level_id)
+            found.append((format_level_label(name, level_id), line))
+            continue
         if not _is_plausible_name(line.text) or _is_label_stat_line(line.text):
             continue
-        return line.text
-    return None
+        found.append((line.text, line))
+    return found
 
 
 def extract_level_name_from_label_text(text: str) -> str | None:
@@ -658,13 +750,13 @@ class WinRtPercentOcr:
             text = str(getattr(line, "text", "") or "").strip()
             if not text:
                 continue
-            x = y = 0.0
+            x = y = h = 0.0
             try:
                 rect = next(iter(line.words)).bounding_rect
-                x, y = float(rect.x) / scale, float(rect.y) / scale
+                x, y, h = float(rect.x) / scale, float(rect.y) / scale, float(rect.height) / scale
             except Exception:
                 pass
-            out.append(OcrLine(text, x, y))
+            out.append(OcrLine(text, x, y, h))
         return out
 
     def read_percent_with_meta(
@@ -894,6 +986,23 @@ class LevelLabelProbe:
     problem: str = ""
 
 
+def _crop_around(img: Image.Image, lines: list[OcrLine], prefer_y: float | None) -> Image.Image:
+    """Trim a tall scan strip to the band around the picked label for the Test preview."""
+    if img.height <= 200:
+        return img
+    candidates = level_label_candidates(lines, max(10.0, img.width * 0.02))
+    if candidates:
+        line = (
+            min(candidates, key=lambda c: abs(c[1].cy - prefer_y))[1] if prefer_y is not None else candidates[0][1]
+        )
+        center = line.cy
+    else:
+        center = prefer_y if prefer_y is not None else img.height / 2.0
+    half = 90
+    top = int(max(0, min(img.height - 2 * half, center - half)))
+    return img.crop((0, top, img.width, min(img.height, top + 2 * half)))
+
+
 def probe_level_label(region: dict[str, Any] | None, target_process: str, scans: int = 3) -> LevelLabelProbe:
     """Scan the label box a few times right now and report what was read.
 
@@ -904,24 +1013,20 @@ def probe_level_label(region: dict[str, Any] | None, target_process: str, scans:
     try:
         if not ocr.available():
             return LevelLabelProbe(None, "", None, "Windows OCR isn't available. Install an OCR language pack in Windows settings.")
-        reg = region if isinstance(region, dict) and region.get("kind") else DEFAULT_LEVEL_LABEL_REGION
-        resolved = compute_region_rect(reg, target_process)
-        if resolved is None or resolved[0] is None:
+        area, prefer_y = level_label_scan_area(region, target_process)
+        if area is None:
             return LevelLabelProbe(None, "", None, f"Geometry Dash ({target_process}) isn't open, or its window can't be found.")
-        covered = not region_shows_process(resolved[0], target_process)
+        covered = not region_shows_process(area, target_process)
         names: list[str] = []
         raws: list[str] = []
         image: Image.Image | None = None
         with mss.MSS() as sct:
             for i in range(max(1, scans)):
-                shot = sct.grab(resolved[0])
-                img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+                lines, img = read_level_label_lines(sct, ocr, area, target_process)
                 if image is None:
-                    image = img
-                big, scale = prepare_label_image(img)
-                lines = ocr.recognize_line_boxes(big, scale=scale)
+                    image = _crop_around(img, lines, prefer_y)
                 raws.append(" | ".join(line.text for line in lines))
-                name = pick_level_name(lines, align_tolerance=max(10.0, img.width * 0.02))
+                name = pick_level_name(lines, align_tolerance=max(10.0, img.width * 0.02), prefer_y=prefer_y)
                 if name:
                     names.append(name)
                 if i + 1 < scans:
@@ -1028,25 +1133,21 @@ class ScreenPercentWatcher:
         region: dict[str, Any] | None,
         target_process: str,
     ) -> tuple[str | None, str | None, str]:
-        """OCR the Eclipse level-name label box.
+        """OCR the Eclipse level-name label.
 
-        Returns (level name or None, raw OCR text or None, status) where status is
+        Returns (level label or None, raw OCR text or None, status) where status is
         "ok", "no_window" (game not found) or "covered" (another window is on top
-        of the label box, so its text must not be read as a level name).
+        of the label area, so its text must not be read as a level name).
         """
-        reg = region if isinstance(region, dict) and region.get("kind") else DEFAULT_LEVEL_LABEL_REGION
-        resolved = compute_region_rect(reg, target_process)
-        if resolved is None or resolved[0] is None:
+        area, prefer_y = level_label_scan_area(region, target_process)
+        if area is None:
             return None, None, "no_window"
-        if not region_shows_process(resolved[0], target_process):
+        if not region_shows_process(area, target_process):
             return None, None, "covered"
-        shot = sct.grab(resolved[0])
-        img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
-        big, scale = prepare_label_image(img)
-        lines = ocr.recognize_line_boxes(big, scale=scale)
+        lines, img = read_level_label_lines(sct, ocr, area, target_process)
         raw = "\n".join(line.text for line in lines)
         tolerance = max(10.0, img.width * 0.02)
-        return pick_level_name(lines, align_tolerance=tolerance), raw, "ok"
+        return pick_level_name(lines, align_tolerance=tolerance, prefer_y=prefer_y), raw, "ok"
 
     def _post_level_result(
         self, candidate: str | None, raw: str | None, error: str | None, status: str = "ok"

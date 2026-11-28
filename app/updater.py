@@ -14,13 +14,11 @@ from functools import cmp_to_key
 from pathlib import Path
 from typing import Callable
 
-APP_VERSION = "4.6.0"
+APP_VERSION = "4.6.1"
 PATCH_NOTES = """\
-- New: your levels sync between PCs while you're signed in with Discord (Levels tab shows sync status and has Sync now)
-- New: watching pauses again when you move to a level that's switched off or close the game, if a level turned it on. Watching you turned on yourself is never paused
-- New: choose which apps each level mutes. Click a level's app count on the Levels tab
-- Faster, lighter app: removed the old built-in window UI that was no longer used
-- Builds now use pinned library versions and updated GitHub Actions for more reliable releases
+- Fixed: switching levels wasn't noticed when you'd drawn a label box. Eclipse's labels move up and down between levels, so GD Quiet now treats your box as a guide and finds the level label above or below it
+- Fixed: long labels like "{levelName} ({levelID})" no longer get cut off at the edge of the box
+- Fixed: text that isn't from Geometry Dash (like the taskbar weather) is no longer read as a level name
 """.strip()
 GITHUB_REPO = "kodymcmonagle808-cmd/gdquiet"
 RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"

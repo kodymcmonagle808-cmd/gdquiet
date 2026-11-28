@@ -1173,7 +1173,7 @@ class GDQuietTests(unittest.TestCase):
                 # The label box is stored separately from the % region.
                 app.cfg["level_label_region"] = {"kind": "window_rel", "rx": 0.01, "ry": 0.4, "rw": 0.2, "rh": 0.05}
                 st = api.get_state()
-                self.assertEqual(st["level_label"]["region_description"], "Custom box")
+                self.assertEqual(st["level_label"]["region_description"], "Custom box (also checks above and below it)")
                 self.assertEqual(st["cfg"]["watch_mode"], "auto_window")
                 st = api.reset_level_region()
                 self.assertIsNone(st["cfg"]["level_label_region"])
@@ -1600,6 +1600,85 @@ class GDQuietTests(unittest.TestCase):
             # Stale snapshot: refused.
             self.assertFalse(app._replace_level_profiles({}, expected))
             self.assertIn("level_sync", api.get_state())
+
+    def test_label_box_is_a_hint_and_the_closest_label_line_wins(self) -> None:
+        line = screen_reader.OcrLine
+        lines = [
+            line("FPS: 240", 11, 80, 20),
+            line("Stereo Madness (1)", 11, 200, 20),
+            line("0/0/0 CPS", 11, 260, 20),
+            line("Back On Track (2)", 11, 300, 20),
+        ]
+        # Without a box the top-most label wins; with one, the line nearest it.
+        self.assertEqual(screen_reader.pick_level_name(lines, 11.5), "Stereo Madness (1)")
+        self.assertEqual(screen_reader.pick_level_name(lines, 11.5, prefer_y=330), "Back On Track (2)")
+        self.assertEqual(screen_reader.pick_level_name(lines, 11.5, prefer_y=150), "Stereo Madness (1)")
+
+    def test_level_label_scan_area_stretches_custom_box(self) -> None:
+        box = {"kind": "window_rel", "rx": 0.00261, "ry": 0.26574, "rw": 0.14122, "rh": 0.05648}
+        with patch.object(screen_reader, "find_window_client_rect", return_value=(0, 0, 1920, 1080)):
+            area, prefer_y = screen_reader.level_label_scan_area(box, "geometrydash.exe")
+            # Full window height, at least 35% of the width, starting at the box.
+            self.assertEqual(area, {"left": 5, "top": 0, "width": 672, "height": 1080})
+            self.assertAlmostEqual(prefer_y, 287 + 61 / 2, delta=1)
+            # No custom box: the default left 30%, top-most label wins.
+            area, prefer_y = screen_reader.level_label_scan_area(None, "geometrydash.exe")
+            self.assertEqual(area, {"left": 0, "top": 0, "width": 576, "height": 1080})
+            self.assertIsNone(prefer_y)
+        with patch.object(screen_reader, "find_window_client_rect", return_value=None):
+            self.assertEqual(screen_reader.level_label_scan_area(box, "geometrydash.exe"), (None, None))
+
+    def test_label_lines_not_drawn_by_the_game_are_dropped(self) -> None:
+        from PIL import Image
+
+        class FakeShot:
+            size = (100, 400)
+            bgra = bytes(100 * 400 * 4)
+
+        class FakeSct:
+            def grab(self, _area):
+                return FakeShot()
+
+        class FakeOcr:
+            def recognize_line_boxes(self, _img, scale=1.0):
+                return [
+                    screen_reader.OcrLine("clubstep startpos (5)", 10, 100, 20),
+                    screen_reader.OcrLine("Cloudy", 10, 380, 20),  # taskbar weather widget
+                ]
+
+        area = {"left": 0, "top": 0, "width": 100, "height": 400}
+        with patch.object(screen_reader, "point_shows_process", side_effect=lambda x, y, *_a: y < 300):
+            lines, img = screen_reader.read_level_label_lines(FakeSct(), FakeOcr(), area, "geometrydash.exe")
+        self.assertEqual([l.text for l in lines], ["clubstep startpos (5)"])
+        self.assertIsInstance(img, Image.Image)
+
+    def test_winrt_ocr_finds_label_after_the_stack_moves(self) -> None:
+        from PIL import ImageFilter
+
+        ocr = screen_reader.WinRtPercentOcr()
+        try:
+            if not ocr.available():
+                self.skipTest("Windows OCR engine unavailable")
+            try:
+                font = ImageFont.truetype("arialbd.ttf", 26)
+            except OSError:
+                self.skipTest("Arial Bold unavailable")
+            box_center_y = 317.5  # where the user drew their box
+            for shift in (0, -38, 38, -76):
+                img = Image.new("RGB", (560, 720), (60, 20, 70)).filter(ImageFilter.GaussianBlur(1))
+                draw = ImageDraw.Draw(img)
+                labels = ["FPS: 240", "Attempt 12", "7.98%", "Best run: 0.00-2.71%", "1/4/2 CPS", "Back On Track (2)"]
+                for i, text in enumerate(labels):
+                    draw.text((10, 120 + shift + i * 38), text, font=font, fill=(235, 225, 240))
+                big, scale = screen_reader.prepare_label_image(img)
+                lines = ocr.recognize_line_boxes(big, scale=scale)
+                self.assertEqual(
+                    screen_reader.pick_level_name(lines, align_tolerance=11.2, prefer_y=box_center_y),
+                    "Back On Track (2)",
+                    f"shift {shift}: {[l.text for l in lines]}",
+                )
+        finally:
+            ocr.close()
 
     def test_web_ui_turns_off_saved_beta_updates_on_start(self) -> None:
         import web_ui
