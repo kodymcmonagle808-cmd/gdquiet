@@ -294,7 +294,7 @@ class AudioMuteController:
         volume_percent: float,
         force: bool = False,
     ) -> None:
-        """Duck selected apps to `volume_percent` (0-100). Like apply(…, duck_to=…) but re-applies on `force`."""
+        """Duck selected apps to `volume_percent` (0-100). Every call re-applies; `force` is kept for API compatibility."""
         self.apply(selected_processes, mute=True, duck_to=volume_percent)
 
     @staticmethod
@@ -374,6 +374,8 @@ class AudioMuteController:
     def _restore_sessions(self, sessions: Iterable[Any]) -> None:
         remaining_muted = set(self._muted_sessions)
         remaining_ducked = dict(self._ducked_sessions)
+        seen: set[tuple[str, int, str]] = set()
+        all_identified = True
         for session in sessions:
             key: tuple[str, int, str] | None = None
             try:
@@ -384,14 +386,33 @@ class AudioMuteController:
                     session.Process.name().lower(),
                     int(session.Process.pid),
                 )
+                seen.add(key)
                 self._restore_session(key, session.SimpleAudioVolume)
                 remaining_muted.discard(key)
                 remaining_ducked.pop(key, None)
             except Exception:
+                if key is None:
+                    all_identified = False
                 if key in self._muted_sessions:
                     remaining_muted.add(key)
                 if key in self._ducked_sessions:
                     remaining_ducked[key] = self._ducked_sessions[key]
+
+        # Forget sessions that no longer exist (e.g. the app was closed while muted).
+        # Without this they stay tracked forever, the controller reports "muted",
+        # and the apply worker keeps retrying a restore that can never succeed.
+        def is_gone(key: tuple[str, int, str]) -> bool:
+            if key in seen:
+                return False
+            if all_identified:
+                return True
+            try:
+                return not psutil.pid_exists(key[1])
+            except Exception:
+                return False
+
+        remaining_muted = {k for k in remaining_muted if not is_gone(k)}
+        remaining_ducked = {k: v for k, v in remaining_ducked.items() if not is_gone(k)}
         self._muted_sessions = remaining_muted
         self._ducked_sessions = remaining_ducked
         self._is_muted = bool(self._muted_sessions)

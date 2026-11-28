@@ -40,8 +40,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "start_minimized": False,
     "auto_check_updates": True,
     "beta_updates": False,
-    "level_detection_beta": False,
-    "level_name_corrections": {},
+    "level_label_enabled": False,
+    "level_label_region": None,
     "level_profiles": {},
     "audio_mode": "mute",
     "ducking_volume": 20.0,
@@ -62,7 +62,14 @@ def load_config() -> dict[str, Any]:
                 data.update(loaded)
         except Exception:
             pass
+    # Removed in 4.4.4: the pause-screen level guessing beta was replaced by
+    # reading the Eclipse level-name label.
+    for legacy_key in _LEGACY_KEYS:
+        data.pop(legacy_key, None)
     return data
+
+
+_LEGACY_KEYS = ("level_detection_beta", "level_name_corrections")
 
 
 def save_config(cfg: dict[str, Any]) -> None:

@@ -292,6 +292,101 @@
     }
   }
 
+  function renderAccount(account) {
+    const acct = account || { configured: false, status: "signed_out", message: "", user: null };
+    const signedIn = acct.status === "signed_in" && acct.user;
+    const waiting = acct.status === "waiting";
+
+    $("acct-in").hidden = !signedIn;
+    const btn = $("acct-signin-btn");
+    btn.hidden = Boolean(signedIn);
+    btn.disabled = !acct.configured;
+    btn.classList.toggle("waiting", waiting);
+    $("acct-signin-txt").textContent = waiting
+      ? "Waiting for browser · Cancel"
+      : acct.configured
+      ? "Sign in with Discord"
+      : "Discord sign-in unavailable";
+
+    if (signedIn) {
+      const u = acct.user;
+      $("acct-name").textContent = u.display_name || "Discord user";
+      $("acct-handle").textContent = u.username && u.username !== u.display_name ? "@" + u.username : "";
+      const img = $("acct-avatar");
+      if (u.avatar_url) {
+        if (img.dataset.src !== u.avatar_url) {
+          img.dataset.src = u.avatar_url;
+          img.src = u.avatar_url;
+        }
+        img.hidden = false;
+      } else {
+        img.hidden = true;
+      }
+      $("acct-initial").textContent = (u.display_name || "?").trim().charAt(0).toUpperCase();
+    }
+
+    const msg = $("acct-msg");
+    const text = !acct.configured && !signedIn ? "This build has no Supabase settings." : acct.message || "";
+    msg.textContent = text;
+    msg.hidden = !text || (signedIn && !waiting && text.startsWith("Signed in"));
+  }
+
+  let levelsSignature = "";
+  let armedDeleteKey = null;
+  let armedDeleteTimer = null;
+
+  function renderLevelLabel(state) {
+    const cfg = state.cfg || {};
+    const info = state.level_label || {};
+    const on = Boolean(cfg.level_label_enabled);
+
+    // The Levels tab only exists while the beta setting is on.
+    $("nav-levels").hidden = !on;
+    if (!on && $("view-levels").classList.contains("on")) showPage("overview");
+
+    $("lvl-region-desc").textContent = info.region_description || "Default · left 30% of the game window";
+    $("lvl-active").textContent = info.active_level || "None yet";
+    const raw = (info.last_raw || "").replace(/\s+/g, " ").trim();
+    $("lvl-raw").textContent = "Raw OCR: " + (raw ? raw.slice(0, 120) : on ? "(nothing read yet)" : "(off)");
+    renderLevels(state.levels || []);
+  }
+
+  function renderLevels(levels) {
+    const list = $("lvl-list");
+    $("lvl-empty").hidden = levels.length > 0;
+    // Only rebuild when something changed, and never while the user is typing in a row.
+    const sig = JSON.stringify(levels) + "|" + armedDeleteKey;
+    if (sig === levelsSignature || list.contains(document.activeElement)) return;
+    levelsSignature = sig;
+    list.innerHTML = levels
+      .map((l) => {
+        const key = escapeHtml(l.key);
+        const armed = armedDeleteKey === l.key;
+        const apps = l.app_count === 1 ? "1 app" : `${l.app_count} apps`;
+        return `<div class="lvl-row${l.enabled ? "" : " off"}${l.active ? " active" : ""}" data-key="${key}">
+          <div class="lvl-main">
+            <b title="${escapeHtml(l.name)}">${escapeHtml(l.name)}</b>
+            <span>${l.active ? '<em>Playing now</em> · ' : ""}${apps}</span>
+          </div>
+          <div class="val lvl-pct"><input class="inp" data-level-threshold value="${Number(l.threshold)}" aria-label="Threshold for ${escapeHtml(l.name)}" /><span class="unit">%</span></div>
+          <button type="button" class="toggle${l.enabled ? " on" : ""}" data-level-toggle aria-label="Use settings for ${escapeHtml(l.name)}"></button>
+          <button type="button" class="lvl-del${armed ? " armed" : ""}" data-level-delete>${armed ? "Confirm" : "Remove"}</button>
+        </div>`;
+      })
+      .join("");
+  }
+
+  function renderBetaNotice(state) {
+    const note = $("settings-beta-note");
+    if (!note || state.is_beta_build) return;
+    if (state.beta_updates_notice) {
+      note.style.display = "block";
+      note.textContent = state.beta_updates_notice;
+    } else {
+      note.style.display = "none";
+    }
+  }
+
   function applyState(state) {
     if (!state) return;
     latestState = state;
@@ -422,15 +517,9 @@
       uBanner.classList.remove("show");
     }
 
-    // Level detection prompt
-    const lBanner = $("level-banner");
-    if (state.level_prompt) {
-      $("level-banner-txt").textContent = `Detected level "${state.level_prompt.display}". Save profile for this level?`;
-      lBanner.classList.add("show");
-    } else {
-      lBanner.classList.remove("show");
-      $("level-corr-row").classList.remove("show");
-    }
+    renderAccount(state.account);
+    renderLevelLabel(state);
+    renderBetaNotice(state);
 
     // Overview
     $("ov-threshold-title").textContent = audioMode === "duck" ? "Duck threshold" : "Mute threshold";
@@ -465,7 +554,7 @@
       deafenSetup.textContent = "Off";
     }
     $("ov-setup-capture").textContent = `${state.capture_short || "Auto"} · ${cfg.target_process || "geometrydash.exe"}`;
-    $("ov-level-profile").textContent = state.active_level_profile || "No confirmed level profile";
+    $("ov-level-profile").textContent = state.active_level_profile || "No level detected yet";
     $("ov-level-status").textContent = state.level_detection_status || "";
 
     // 30s test
@@ -630,7 +719,7 @@
         inp.value = String(val);
       }
     });
-    document.querySelectorAll("#view-settings button.toggle[data-bool-key]").forEach((tog) => {
+    document.querySelectorAll("button.toggle[data-bool-key]").forEach((tog) => {
       const key = tog.dataset.boolKey;
       tog.classList.toggle("on", Boolean(cfg[key]));
     });
@@ -756,19 +845,93 @@
     $("downgrade-banner-later").addEventListener("click", async () => {
       await mutate((a) => a.dismiss_downgrade_banner());
     });
-    $("level-yes").addEventListener("click", async () => {
-      await mutate((a) => a.confirm_level_candidate());
+    // Discord account
+    $("acct-signin-btn").addEventListener("click", async () => {
+      const waiting = latestState && latestState.account && latestState.account.status === "waiting";
+      await mutate((a) => (waiting ? a.discord_cancel_sign_in() : a.discord_sign_in()));
     });
-    $("level-correct").addEventListener("click", () => {
-      $("level-corr-row").classList.add("show");
-      $("level-corr-input").focus();
+    $("acct-signout-btn").addEventListener("click", async () => {
+      await mutate((a) => a.discord_sign_out());
     });
-    $("level-later").addEventListener("click", async () => {
-      await mutate((a) => a.dismiss_level_candidate());
+    $("acct-avatar").addEventListener("error", () => {
+      $("acct-avatar").hidden = true;
     });
-    $("level-corr-save").addEventListener("click", async () => {
-      await mutate((a) => a.save_level_correction($("level-corr-input").value));
+
+    // Eclipse level-name label box
+    $("lvl-drag-btn").addEventListener("click", async () => {
+      await mutate((a) => a.pick_region_now("level"));
       flashSaved();
+    });
+    $("lvl-delay-btn").addEventListener("click", async () => {
+      const btn = $("lvl-delay-btn");
+      btn.disabled = true;
+      for (let s = 3; s >= 1; s--) {
+        btn.textContent = `Picking in ${s}s...`;
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      btn.textContent = "Pick with 3s delay";
+      btn.disabled = false;
+      await mutate((a) => a.pick_region_now("level"));
+      flashSaved();
+    });
+    $("lvl-reset-btn").addEventListener("click", async () => {
+      await mutate((a) => a.reset_level_region());
+      flashSaved();
+    });
+
+    // Levels list
+    $("lvl-add-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const name = $("lvl-add-name").value.trim();
+      if (!name) {
+        $("lvl-add-name").focus();
+        return;
+      }
+      const pct = $("lvl-add-threshold").value.trim();
+      await mutate((a) => a.add_level(name, pct === "" ? null : pct));
+      $("lvl-add-name").value = "";
+      $("lvl-add-threshold").value = "";
+      flashSaved();
+    });
+    const levelList = $("lvl-list");
+    levelList.addEventListener("click", async (e) => {
+      const row = e.target.closest(".lvl-row");
+      if (!row) return;
+      const key = row.dataset.key;
+      if (e.target.closest("[data-level-toggle]")) {
+        const tog = e.target.closest("[data-level-toggle]");
+        const next = !tog.classList.contains("on");
+        tog.classList.toggle("on", next);
+        await mutate((a) => a.set_level_enabled(key, next));
+        flashSaved();
+      } else if (e.target.closest("[data-level-delete]")) {
+        if (armedDeleteKey === key) {
+          armedDeleteKey = null;
+          clearTimeout(armedDeleteTimer);
+          await mutate((a) => a.delete_level(key));
+          flashSaved();
+        } else {
+          armedDeleteKey = key;
+          clearTimeout(armedDeleteTimer);
+          armedDeleteTimer = setTimeout(() => {
+            armedDeleteKey = null;
+            if (latestState) renderLevels(latestState.levels || []);
+          }, 3000);
+          if (latestState) renderLevels(latestState.levels || []);
+        }
+      }
+    });
+    const saveLevelThreshold = async (inp) => {
+      const row = inp.closest(".lvl-row");
+      if (!row) return;
+      await mutate((a) => a.set_level_threshold(row.dataset.key, inp.value));
+      flashSaved();
+    };
+    levelList.addEventListener("change", (e) => {
+      if (e.target.matches("[data-level-threshold]")) saveLevelThreshold(e.target);
+    });
+    levelList.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && e.target.matches("[data-level-threshold]")) e.target.blur();
     });
 
     // Overview threshold & controls
@@ -940,7 +1103,7 @@
         flashSaved();
       });
     });
-    document.querySelectorAll("#view-settings button.toggle[data-bool-key]").forEach((tog) => {
+    document.querySelectorAll("button.toggle[data-bool-key]").forEach((tog) => {
       tog.addEventListener("click", async () => {
         const key = tog.dataset.boolKey;
         const next = !tog.classList.contains("on");

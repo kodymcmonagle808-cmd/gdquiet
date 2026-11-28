@@ -7,6 +7,7 @@ from ctypes import wintypes
 import io
 import os
 from pathlib import Path
+import re
 import sys
 import threading
 import time
@@ -18,16 +19,22 @@ from PIL import Image
 import psutil
 import webview
 
+from auth import DiscordAuth
 from config import DEFAULT_CONFIG, app_data_dir, config_path, load_config, save_config
 from discord_hotkey import DiscordDeafenController, GlobalHotkeyWatcher, send_hotkey
 from obs_overlay import OverlayServer
-from profiles import apply_level_profile, build_level_profile, profile_key
+from profiles import (
+    apply_level_profile,
+    build_level_profile,
+    find_matching_profile,
+    profile_enabled,
+    profile_key,
+)
 from screen_reader import (
     ScreenPercentWatcher,
     ScreenReading,
     ScreenTestSession,
     find_window_client_rect,
-    normalize_level_name,
 )
 from updater import (
     APP_VERSION,
@@ -60,6 +67,10 @@ from gdquiet import (
 _PRESET_MAP: dict[str, tuple[float, float, float, float]] = {
     label: (rx, ry, rw, rh) for label, rx, ry, rw, rh in PERCENT_PRESETS
 }
+
+BETA_UPDATES_BLOCKED_MESSAGE = (
+    "There are no beta updates that work right now. GD Quiet will keep installing stable updates."
+)
 
 _NUMERIC_BOUNDS: dict[str, tuple[float, float, bool]] = {
     "mute_at_percent": (0.0, 100.0, False),
@@ -216,6 +227,11 @@ class GDQuietWebApp:
 
         self.cfg_lock = threading.RLock()
         self.cfg = load_config()
+        self._beta_notice = ""
+        if self.cfg.get("beta_updates", False):
+            # Beta updates are switched off for everyone until a working beta exists.
+            self.cfg["beta_updates"] = False
+            save_config(self.cfg)
         self._active_level_name = ""
         self._active_level_key = ""
         self._tray_audio_override: bool | None = None
@@ -254,9 +270,11 @@ class GDQuietWebApp:
         self._checking_updates = False
         self._update_check_lock = threading.Lock()
 
-        self._pending_level_raw = ""
-        self._pending_level_display = ""
-        self._level_prompt_visible = False
+        self._last_level_label_raw = ""
+        self._level_detection_error = ""
+
+        self.auth = DiscordAuth(app_data_dir() / "session.bin")
+        self.auth.load()
 
         self.obs_overlay_server = OverlayServer(
             get_status=self._get_obs_overlay_status,
@@ -566,21 +584,23 @@ class GDQuietWebApp:
             }
             show_banner = self._pending_update.latest_version != self._dismissed_update_version
 
-        level_prompt = (
-            {"raw": self._pending_level_raw, "display": self._pending_level_display}
-            if self._level_prompt_visible and self._pending_level_display
-            else None
-        )
-        level_det_status = (
-            f"Level detection beta is on ({len(cfg_copy.get('level_profiles') or {})} saved profiles)"
-            if cfg_copy.get("level_detection_beta", False)
-            else "Level detection beta is off"
-        )
+        profile_count = len(cfg_copy.get("level_profiles") or {})
+        if not cfg_copy.get("level_label_enabled", False):
+            level_det_status = "Level label reading is off"
+        elif self._level_detection_error:
+            level_det_status = f"Level label error: {self._level_detection_error[:80]}"
+        else:
+            level_det_status = f"Reading Eclipse level label · {profile_count} saved profiles"
         active_profile = (
             f"Level profile: {self._active_level_name}"
             if self._active_level_name
-            else "No confirmed level profile"
+            else "No level detected yet"
         )
+        level_region = cfg_copy.get("level_label_region")
+        if isinstance(level_region, dict) and level_region.get("kind"):
+            level_region_desc = "Custom box"
+        else:
+            level_region_desc = "Default · left 30% of the game window"
 
         latest_stable_dict = (
             {
@@ -631,7 +651,14 @@ class GDQuietWebApp:
             "watch_hotkey_status": self._watch_hotkey_status,
             "active_level_profile": active_profile,
             "level_detection_status": level_det_status,
-            "level_prompt": level_prompt,
+            "level_label": {
+                "region_description": level_region_desc,
+                "last_raw": self._last_level_label_raw,
+                "active_level": self._active_level_name,
+            },
+            "account": self.auth.to_state(),
+            "levels": self._levels_state(cfg_copy),
+            "beta_updates_notice": self._beta_notice,
             "pending_update": pending_upd,
             "show_update_banner": show_banner,
             "update_btn_text": self._update_btn_text,
@@ -673,6 +700,15 @@ class GDQuietWebApp:
         return self.get_state()
 
     def set_setting(self, key: str, value: Any) -> dict[str, Any]:
+        if key == "beta_updates" and value:
+            # No working beta builds are published right now; keep everyone on stable.
+            with self.cfg_lock:
+                self.cfg["beta_updates"] = False
+            self._save_cfg()
+            self._beta_notice = BETA_UPDATES_BLOCKED_MESSAGE
+            self._footer_message = BETA_UPDATES_BLOCKED_MESSAGE
+            return self.get_state()
+
         if key in _NUMERIC_BOUNDS:
             min_v, max_v, is_int = _NUMERIC_BOUNDS[key]
             parsed = float(value)
@@ -718,13 +754,12 @@ class GDQuietWebApp:
                 with self.cfg_lock:
                     hk = self.cfg.get("deafen_hotkey")
                 self.discord_ctrl.set_deafened(False, hk, False)
-        elif key == "level_detection_beta":
+        elif key == "level_label_enabled":
             if not value:
                 self._active_level_name = ""
                 self._active_level_key = ""
-                self._pending_level_raw = ""
-                self._pending_level_display = ""
-                self._level_prompt_visible = False
+                self._last_level_label_raw = ""
+                self._level_detection_error = ""
 
         return self.get_state()
 
@@ -908,7 +943,9 @@ class GDQuietWebApp:
             self._save_cfg()
         return self.get_state()
 
-    def pick_region_now(self) -> dict[str, Any]:
+    def pick_region_now(self, target: str = "percent") -> dict[str, Any]:
+        """Drag a box on screen. target="percent" sets the % region, "level" the Eclipse label box."""
+        for_level = target == "level"
         if self._region_picking:
             return self.get_state()
         self._region_picking = True
@@ -950,8 +987,11 @@ class GDQuietWebApp:
                     else:
                         reg = {"kind": "screen", "left": left, "top": top, "width": width, "height": height}
                     with self.cfg_lock:
-                        self.cfg["watch_mode"] = "custom_region"
-                        self.cfg["custom_region"] = reg
+                        if for_level:
+                            self.cfg["level_label_region"] = reg
+                        else:
+                            self.cfg["watch_mode"] = "custom_region"
+                            self.cfg["custom_region"] = reg
                     self._save_cfg()
                     try:
                         root.destroy()
@@ -987,7 +1027,9 @@ class GDQuietWebApp:
         if self._active_level_key:
             with self.cfg_lock:
                 profiles = dict(self.cfg.get("level_profiles") or {})
-                profiles[self._active_level_key] = build_level_profile(self._active_level_name, self.cfg)
+                existing = profiles.get(self._active_level_key)
+                enabled = profile_enabled(existing) if isinstance(existing, dict) else True
+                profiles[self._active_level_key] = build_level_profile(self._active_level_name, self.cfg, enabled)
                 self.cfg["level_profiles"] = profiles
             self._save_cfg()
             self._footer_message = f"Saved profile for {self._active_level_name}."
@@ -996,44 +1038,131 @@ class GDQuietWebApp:
             self._footer_message = "Saved current settings."
         return self.get_state()
 
-    def confirm_level_candidate(self) -> dict[str, Any]:
-        display = self._pending_level_display.strip()
-        if display:
-            self._save_level_detection_feedback(display)
+    def reset_level_region(self) -> dict[str, Any]:
+        with self.cfg_lock:
+            self.cfg["level_label_region"] = None
+        self._save_cfg()
         return self.get_state()
-
-    def dismiss_level_candidate(self) -> dict[str, Any]:
-        self._level_prompt_visible = False
-        return self.get_state()
-
-    def save_level_correction(self, corrected: str) -> dict[str, Any]:
-        text = (corrected or "").strip()
-        if text:
-            self._save_level_detection_feedback(text)
-        return self.get_state()
-
-    def _save_level_detection_feedback(self, accepted_name: str) -> None:
-        raw_key = normalize_level_name(self._pending_level_raw)
-        if raw_key:
-            with self.cfg_lock:
-                corrections = dict(self.cfg.get("level_name_corrections") or {})
-                corrections[raw_key] = accepted_name
-                self.cfg["level_name_corrections"] = corrections
-        self._activate_level_profile(accepted_name, profile_key(accepted_name))
-        self._level_prompt_visible = False
 
     def _activate_level_profile(self, level_name: str, key: str) -> None:
         with self.cfg_lock:
             profiles = dict(self.cfg.get("level_profiles") or {})
             profile = profiles.get(key)
             if isinstance(profile, dict):
-                self.cfg.update(apply_level_profile(self.cfg, profile))
+                # A level switched off on the Levels page is recognised but its settings aren't applied.
+                if profile_enabled(profile):
+                    self.cfg.update(apply_level_profile(self.cfg, profile))
+                level_name = str(profile.get("name") or level_name)
             else:
                 profiles[key] = build_level_profile(level_name, self.cfg)
                 self.cfg["level_profiles"] = profiles
         self._active_level_name = level_name
         self._active_level_key = key
         self._save_cfg()
+        # A loaded profile can change the selected apps; re-apply if we're mid-mute.
+        if self.current_want_mute:
+            self._apply_mute_state(True, force_reapply=True)
+
+    # ---- Levels page ----
+
+    def _levels_state(self, cfg_copy: dict[str, Any]) -> list[dict[str, Any]]:
+        profiles = cfg_copy.get("level_profiles") or {}
+        rows = []
+        for key, profile in profiles.items():
+            if not isinstance(profile, dict):
+                continue
+            rows.append(
+                {
+                    "key": key,
+                    "name": str(profile.get("name") or key),
+                    "threshold": float(profile.get("mute_at_percent", 50.0)),
+                    "enabled": profile_enabled(profile),
+                    "app_count": len(profile.get("selected_apps") or []),
+                    "active": key == self._active_level_key,
+                }
+            )
+        rows.sort(key=lambda r: r["name"].casefold())
+        return rows
+
+    def add_level(self, name: str, threshold: Any = None) -> dict[str, Any]:
+        """Add a level by name (or update an existing one), using the current apps and capture settings."""
+        level_name = re.sub(r"\s+", " ", str(name or "")).strip()[:80]
+        if not profile_key(level_name):
+            self._footer_message = "Type a level name first."
+            return self.get_state()
+        with self.cfg_lock:
+            profiles = dict(self.cfg.get("level_profiles") or {})
+            key = profile_key(level_name)
+            existing = profiles.get(key)
+            profile = build_level_profile(level_name, self.cfg)
+            if isinstance(existing, dict):
+                profile = {**existing, "name": level_name}
+            if threshold not in (None, ""):
+                try:
+                    profile["mute_at_percent"] = round(max(0.0, min(100.0, float(threshold))), 3)
+                except (TypeError, ValueError):
+                    pass
+            profiles[key] = profile
+            self.cfg["level_profiles"] = profiles
+        self._save_cfg()
+        self._footer_message = f"{'Updated' if existing else 'Added'} {level_name}."
+        return self.get_state()
+
+    def set_level_enabled(self, key: str, enabled: bool) -> dict[str, Any]:
+        with self.cfg_lock:
+            profiles = dict(self.cfg.get("level_profiles") or {})
+            profile = profiles.get(key)
+            if isinstance(profile, dict):
+                profiles[key] = {**profile, "enabled": bool(enabled)}
+                self.cfg["level_profiles"] = profiles
+                # Turning on the level you're playing applies its settings right away.
+                if enabled and key == self._active_level_key:
+                    self.cfg.update(apply_level_profile(self.cfg, profiles[key]))
+        self._save_cfg()
+        return self.get_state()
+
+    def set_level_threshold(self, key: str, threshold: Any) -> dict[str, Any]:
+        try:
+            pct = round(max(0.0, min(100.0, float(threshold))), 3)
+        except (TypeError, ValueError):
+            return self.get_state()
+        with self.cfg_lock:
+            profiles = dict(self.cfg.get("level_profiles") or {})
+            profile = profiles.get(key)
+            if isinstance(profile, dict):
+                profiles[key] = {**profile, "mute_at_percent": pct}
+                self.cfg["level_profiles"] = profiles
+                if key == self._active_level_key and profile_enabled(profile):
+                    self.cfg["mute_at_percent"] = pct
+        self._save_cfg()
+        return self.get_state()
+
+    def delete_level(self, key: str) -> dict[str, Any]:
+        with self.cfg_lock:
+            profiles = dict(self.cfg.get("level_profiles") or {})
+            removed = profiles.pop(key, None)
+            self.cfg["level_profiles"] = profiles
+        if key == self._active_level_key:
+            self._active_level_key = ""
+            self._active_level_name = ""
+        self._save_cfg()
+        if isinstance(removed, dict):
+            self._footer_message = f"Removed {removed.get('name') or key}."
+        return self.get_state()
+
+    # ---- Discord account (Supabase) ----
+
+    def discord_sign_in(self) -> dict[str, Any]:
+        self.auth.start_sign_in()
+        return self.get_state()
+
+    def discord_cancel_sign_in(self) -> dict[str, Any]:
+        self.auth.cancel_sign_in()
+        return self.get_state()
+
+    def discord_sign_out(self) -> dict[str, Any]:
+        self.auth.sign_out()
+        return self.get_state()
 
     # ---- 30s Screen Test ----
 
@@ -1073,16 +1202,20 @@ class GDQuietWebApp:
                     self.test_session.stop()
                     testing = False
 
-        if reading.level_name_candidate and self.cfg.get("level_detection_beta", False):
-            raw_name = reading.level_name_candidate.strip()
-            if raw_name:
-                raw_key = normalize_level_name(raw_name)
+        if self.cfg.get("level_label_enabled", False):
+            if reading.level_label_raw is not None:
+                self._last_level_label_raw = reading.level_label_raw.strip()
+                self._level_detection_error = ""
+            if reading.level_detection_error:
+                self._level_detection_error = reading.level_detection_error
+            level_name = (reading.level_name_candidate or "").strip()
+            if level_name:
                 with self.cfg_lock:
-                    corrections = self.cfg.get("level_name_corrections") or {}
-                    display = corrections.get(raw_key, raw_name) if raw_key else raw_name
-                self._pending_level_raw = raw_name
-                self._pending_level_display = display
-                self._level_prompt_visible = True
+                    profiles = dict(self.cfg.get("level_profiles") or {})
+                key = find_matching_profile(profiles, level_name) or profile_key(level_name)
+                if key and key != self._active_level_key:
+                    self._activate_level_profile(level_name, key)
+                    self._footer_message = f"Level detected: {self._active_level_name}"
 
         with self.cfg_lock:
             watch_enabled = bool(self.cfg.get("watch_enabled", True))
@@ -1132,6 +1265,7 @@ class GDQuietWebApp:
             self._latest_reading = reading
 
     def _apply_worker(self) -> None:
+        restore_retries = 0
         while True:
             with self._apply_cond:
                 while (
@@ -1172,8 +1306,14 @@ class GDQuietWebApp:
                 if not force_reapply:
                     self.discord_ctrl.set_deafened(want_mute, hk, auto_deaf)
 
+            if want_mute or fade_volume is not None or not self.audio_ctrl.has_active_effect:
+                restore_retries = 0
+
             if not want_mute and fade_volume is None and self.audio_ctrl.has_active_effect:
-                time.sleep(0.08)
+                # Retry a restore that didn't fully succeed, backing off so a
+                # persistent WASAPI failure can't turn into a busy loop.
+                restore_retries += 1
+                time.sleep(min(2.0, 0.08 * (2 ** min(restore_retries - 1, 5))))
                 with self._apply_cond:
                     if self._pending_mute is None and not self._apply_stop:
                         self._pending_mute = False
@@ -1287,9 +1427,8 @@ class GDQuietWebApp:
             self.cfg.update(dict(DEFAULT_CONFIG))
         self._active_level_name = ""
         self._active_level_key = ""
-        self._pending_level_raw = ""
-        self._pending_level_display = ""
-        self._level_prompt_visible = False
+        self._last_level_label_raw = ""
+        self._level_detection_error = ""
         self._save_cfg()
 
         self.discord_ctrl.set_cooldown_ms(float(DEFAULT_CONFIG["discord_cooldown_ms"]))
@@ -1627,20 +1766,35 @@ class WebApi:
     def set_region_preset(self, preset: str) -> dict[str, Any]:
         return self._app.set_region_preset(preset)
 
-    def pick_region_now(self) -> dict[str, Any]:
-        return self._app.pick_region_now()
+    def pick_region_now(self, target: str = "percent") -> dict[str, Any]:
+        return self._app.pick_region_now(target)
+
+    def reset_level_region(self) -> dict[str, Any]:
+        return self._app.reset_level_region()
 
     def save_setup(self) -> dict[str, Any]:
         return self._app.save_setup()
 
-    def confirm_level_candidate(self) -> dict[str, Any]:
-        return self._app.confirm_level_candidate()
+    def add_level(self, name: str, threshold: Any = None) -> dict[str, Any]:
+        return self._app.add_level(name, threshold)
 
-    def dismiss_level_candidate(self) -> dict[str, Any]:
-        return self._app.dismiss_level_candidate()
+    def set_level_enabled(self, key: str, enabled: bool) -> dict[str, Any]:
+        return self._app.set_level_enabled(key, enabled)
 
-    def save_level_correction(self, corrected: str) -> dict[str, Any]:
-        return self._app.save_level_correction(corrected)
+    def set_level_threshold(self, key: str, threshold: Any) -> dict[str, Any]:
+        return self._app.set_level_threshold(key, threshold)
+
+    def delete_level(self, key: str) -> dict[str, Any]:
+        return self._app.delete_level(key)
+
+    def discord_sign_in(self) -> dict[str, Any]:
+        return self._app.discord_sign_in()
+
+    def discord_cancel_sign_in(self) -> dict[str, Any]:
+        return self._app.discord_cancel_sign_in()
+
+    def discord_sign_out(self) -> dict[str, Any]:
+        return self._app.discord_sign_out()
 
     def toggle_obs_overlay(self) -> dict[str, Any]:
         return self._app.toggle_obs_overlay()

@@ -14,11 +14,15 @@ from functools import cmp_to_key
 from pathlib import Path
 from typing import Callable
 
-APP_VERSION = "4.4.4-beta.1"
+APP_VERSION = "4.5.0"
 PATCH_NOTES = """\
-- Muting is now instant (1 frame) when percent crosses above your threshold
-- Unmuting still requires 2 consecutive below-threshold frames (prevents false unmutes)
-- Real patch notes now show in the update banner instead of install instructions
+- New: Sign in with Discord from the sidebar
+- New (beta): Per-level profiles from the Eclipse {levelName} label. Turn it on in Settings, then use the new Levels tab to add levels, set each level's threshold, and switch levels on or off
+- Setup: in Geometry Dash press Tab to open Eclipse, go to Labels, choose Add new label, and type {levelName}
+- Reads the left 30% of the game window by default, or drag a box around the label
+- Removed the old pause-screen level guessing and its confirm/correct prompt
+- Beta updates are turned off for now because there are no working beta builds
+- Fixed: closing a muted app (e.g. Spotify) left GD Quiet stuck showing "muted" and retrying in the background
 """.strip()
 GITHUB_REPO = "kodymcmonagle808-cmd/gdquiet"
 RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"

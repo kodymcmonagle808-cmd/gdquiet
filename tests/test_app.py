@@ -375,47 +375,25 @@ class GDQuietTests(unittest.TestCase):
         self.assertNotIn("supabase_url", config.DEFAULT_CONFIG)
         self.assertNotIn("supabase_anon_key", config.DEFAULT_CONFIG)
         self.assertNotIn("session", config.DEFAULT_CONFIG)
-        self.assertFalse(config.DEFAULT_CONFIG["level_detection_beta"])
-        self.assertEqual(config.DEFAULT_CONFIG["level_name_corrections"], {})
+        self.assertFalse(config.DEFAULT_CONFIG["level_label_enabled"])
+        self.assertIsNone(config.DEFAULT_CONFIG["level_label_region"])
+        self.assertNotIn("level_detection_beta", config.DEFAULT_CONFIG)
 
-    def test_level_name_correction_is_saved_and_reused_locally(self) -> None:
-        import threading
-        import gdquiet
+    def test_load_config_drops_removed_level_guessing_keys(self) -> None:
+        import json
+        import tempfile
 
-        class FakeWidget:
-            def __init__(self) -> None:
-                self.options: dict[str, object] = {}
-
-            def configure(self, **kwargs: object) -> None:
-                self.options.update(kwargs)
-
-            def pack(self, **_kwargs: object) -> None:
-                pass
-
-            def pack_forget(self) -> None:
-                pass
-
-        app = gdquiet.GDQuietApp.__new__(gdquiet.GDQuietApp)
-        app.cfg_lock = threading.RLock()
-        app.cfg = {"level_detection_beta": True, "level_name_corrections": {}}
-        app._pending_level_raw = "mis-read!"
-        app._pending_level_display = "mis-read!"
-        app._closing = False
-        app._save_cfg = lambda: None
-        app.level_detection_status_lbl = FakeWidget()
-        app.level_detection_prompt_label = FakeWidget()
-        app.level_detection_prompt = FakeWidget()
-        app.level_correction_row = FakeWidget()
-
-        app._save_level_detection_feedback("Correct Name")
-        self.assertEqual(app.cfg["level_name_corrections"], {"misread": "Correct Name"})
-
-        app._show_level_detection_candidate("MIS READ")
-        self.assertEqual(
-            app.level_detection_prompt_label.options["text"],
-            "Learned match: Correct Name. Is this correct?",
-        )
-        self.assertEqual(config.DEFAULT_CONFIG["level_name_corrections"], {})
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            path.write_text(
+                json.dumps({"level_detection_beta": True, "level_name_corrections": {"a": "b"}, "mute_at_percent": 61}),
+                encoding="utf-8",
+            )
+            with patch.object(config, "config_path", return_value=path):
+                loaded = config.load_config()
+        self.assertNotIn("level_detection_beta", loaded)
+        self.assertNotIn("level_name_corrections", loaded)
+        self.assertEqual(loaded["mute_at_percent"], 61)
 
     def test_live_window_enumeration_runs(self) -> None:
         targets = window_audio.list_mute_targets(include_background_audio=True)
@@ -441,30 +419,117 @@ class GDQuietTests(unittest.TestCase):
         self.assertIsNone(screen_reader.parse_percent_from_text("NO%"))
         self.assertIsNone(screen_reader.parse_percent_from_text("Attempt 42"))
 
-    def test_level_name_detection_requires_pause_menu_text(self) -> None:
-        self.assertIsNone(screen_reader.extract_level_name_from_pause_text("Stereo Madness\n67%"))
-        self.assertEqual(
-            screen_reader.extract_level_name_from_pause_text(
-                "Stereo Madness\nAttempts: 12\nResume\nRestart\nPractice"
-            ),
-            "Stereo Madness",
-        )
-        self.assertIsNone(
-            screen_reader.extract_level_name_from_pause_text("Paused\nResume\nRestart\nPractice\nAttempts: 12")
-        )
+    def test_level_name_from_eclipse_label_skips_stat_labels(self) -> None:
+        extract = screen_reader.extract_level_name_from_label_text
+        self.assertEqual(extract("Stereo Madness"), "Stereo Madness")
+        self.assertEqual(extract("FPS: 240\nCPS: 4/9\nBloodbath by Riot\nAttempt 23\n12:41:07"), "Bloodbath by Riot")
+        self.assertEqual(extract("Level: Deadlocked\nNoclip 98.5%"), "Deadlocked")
+        self.assertEqual(extract("Testmode\nTime Machine"), "Time Machine")
+        self.assertIsNone(extract("FPS 240\nAttempts: 12\n67%\n00:31"))
+        self.assertIsNone(extract(""))
 
-    def test_level_name_tracker_requires_stable_candidate_and_rearms(self) -> None:
+    def test_level_label_region_defaults_to_left_30_percent(self) -> None:
+        with patch.object(screen_reader, "find_window_client_rect", return_value=(100, 50, 1920, 1080)):
+            rect, _label = screen_reader.compute_region_rect(
+                screen_reader.DEFAULT_LEVEL_LABEL_REGION, "geometrydash.exe"
+            )
+        self.assertEqual(rect, {"left": 100, "top": 50, "width": 576, "height": 1080})
+
+    def test_level_name_tracker_requires_stable_candidate_and_ignores_gaps(self) -> None:
         tracker = screen_reader.LevelNameTracker()
         self.assertIsNone(tracker.update("Stereo Madness"))
         self.assertEqual(tracker.update("stereo madness"), "stereo madness")
         self.assertIsNone(tracker.update("Stereo Madness"))
+        # A missed OCR read mid-level must not re-trigger the same level.
         self.assertIsNone(tracker.update(None))
         self.assertIsNone(tracker.update("Stereo Madness"))
-        self.assertEqual(tracker.update("Stereo Madness"), "Stereo Madness")
+        # Close misreads count as the same level.
+        self.assertIsNone(tracker.update("Stere0 Madnes"))
+        self.assertIsNone(tracker.update("Stereo Madness"))
+        # A different level needs 2 reads; switching back is reported again.
         self.assertIsNone(tracker.update("Deadlocked"))
         self.assertEqual(tracker.update("Deadlocked"), "Deadlocked")
+        self.assertIsNone(tracker.update("Deadlocked"))
+        self.assertIsNone(tracker.update("Deadlocked"))
+        self.assertIsNone(tracker.update("Deadlocked"))
         self.assertIsNone(tracker.update("Stereo Madness"))
         self.assertEqual(tracker.update("Stereo Madness"), "Stereo Madness")
+        tracker.reset()
+        self.assertIsNone(tracker.update("Stereo Madness"))
+        self.assertEqual(tracker.update("Stereo Madness"), "Stereo Madness")
+
+    def test_level_name_tracker_tolerates_gaps_and_picks_common_spelling(self) -> None:
+        tracker = screen_reader.LevelNameTracker()
+        self.assertIsNone(tracker.update("clubstep sii@ttpos"))
+        self.assertIsNone(tracker.update(None))
+        self.assertIsNone(tracker.update("Attempt garbage"))
+        reported = tracker.update("clubstep startpos")
+        # 2 of the last 5 reads agree, so it's reported despite the gap.
+        self.assertIn(reported, {"clubstep startpos", "clubstep sii@ttpos"})
+        tracker.reset()
+        tracker.update("clubstep startpos")
+        tracker.update("clubstep sii@ttpos")
+        self.assertIsNone(tracker.update("clubstep startpos"))
+
+    def test_pick_level_name_from_real_eclipse_overlay(self) -> None:
+        # OCR lines (text, left x) from a real 1920x1080 frame: Eclipse labels at x~11,
+        # another mod's friend list at x~74, and the huge in-game "Attempt 180" text.
+        line = screen_reader.OcrLine
+        frame = [
+            line("FPS: 240", 12),
+            line("Attematq 4)", 10.5),
+            line("-5\ufffd.550/0", 0),
+            line("Best run: 57.914951150/0", 12),
+            line("0/0/0 CPS", 11),
+            line("clubstep startpos", 11.5),
+            line("bread", 74.5),
+            line("Cous", 74.5),
+            line("LIVE", 200),
+        ]
+        self.assertEqual(screen_reader.pick_level_name(frame, align_tolerance=11.5), "clubstep startpos")
+        # Name unreadable this frame: don't fall back to another overlay's text.
+        without_name = [ln for ln in frame if ln.text != "clubstep startpos"]
+        self.assertIsNone(screen_reader.pick_level_name(without_name, align_tolerance=11.5))
+        # Garbled big "Attempt" text is a stat, not a level name.
+        for garbled in ("At+emptl", "AtternpU", "Atiternp", "Atternat", "At+ernztl"):
+            self.assertIsNone(
+                screen_reader.pick_level_name([line("FPS: 240", 12), line(garbled, 10)], align_tolerance=11.5),
+                garbled,
+            )
+        for stat in ("Bestrun;A7v91-95.159/6", "cess. 240", "o/o/o\ufffdpS", "O/O/OCPS", "From: 57%"):
+            self.assertIsNone(screen_reader.extract_level_name_from_label_text(stat), stat)
+        # A box drawn tightly around just the label has no stat lines to align to.
+        self.assertEqual(screen_reader.pick_level_name([line("clubstep startpos", 3)]), "clubstep startpos")
+
+    def test_ocr_misreads_snap_to_saved_level(self) -> None:
+        saved = {
+            "clubstepstartpos": {"name": "clubstep startpos"},
+            "deadlocked": {"name": "Deadlocked"},
+        }
+        self.assertEqual(profiles.find_matching_profile(saved, "clubstep sii@ttpos"), "clubstepstartpos")
+        self.assertEqual(profiles.find_matching_profile(saved, "c!ubstep startpos"), "clubstepstartpos")
+        self.assertEqual(profiles.find_matching_profile(saved, "DEADLOCKED"), "deadlocked")
+        self.assertIsNone(profiles.find_matching_profile(saved, "Bloodbath"))
+        self.assertIsNone(profiles.find_matching_profile(saved, ""))
+
+    def test_winrt_ocr_reads_level_name_from_stacked_eclipse_labels(self) -> None:
+        ocr = screen_reader.WinRtPercentOcr()
+        try:
+            if not ocr.available():
+                self.skipTest("Windows OCR engine unavailable")
+            try:
+                font = ImageFont.truetype("arialbd.ttf", 26)
+            except OSError:
+                self.skipTest("Arial Bold unavailable")
+            img = Image.new("RGB", (576, 400), (40, 70, 160))
+            draw = ImageDraw.Draw(img)
+            for i, text in enumerate(["FPS: 240", "CPS: 4/9", "Stereo Madness", "Attempt 12"]):
+                draw.text((12, 12 + i * 36), text, font=font, fill=(255, 255, 255), stroke_width=2, stroke_fill=(0, 0, 0))
+            raw = ocr.recognize_lines(img.convert("RGBA"))
+            self.assertGreaterEqual(raw.count("\n"), 2, raw)
+            self.assertEqual(screen_reader.extract_level_name_from_label_text(raw), "Stereo Madness")
+        finally:
+            ocr.close()
 
     def test_winrt_ocr_reads_rendered_hud_percentages(self) -> None:
         ocr = screen_reader.WinRtPercentOcr()
@@ -1219,6 +1284,43 @@ class GDQuietTests(unittest.TestCase):
             self.assertEqual(fake_session.SimpleAudioVolume.muted, 0)
             self.assertFalse(ctrl.is_muted)
 
+    def test_audio_restore_forgets_sessions_of_closed_apps(self) -> None:
+        fake_session = FakeSession("spotify.exe", 111, muted=0, instance_id="inst1")
+        ctrl = window_audio.AudioMuteController()
+        with patch.object(window_audio.AudioUtilities, "GetAllSessions", return_value=[fake_session]):
+            ctrl.apply(["spotify.exe"], True)
+        self.assertTrue(ctrl.has_active_effect)
+        # Spotify exits while muted: its session disappears from the list.
+        with patch.object(window_audio.AudioUtilities, "GetAllSessions", return_value=[]):
+            ctrl.restore()
+        self.assertFalse(ctrl.has_active_effect)
+        self.assertFalse(ctrl.is_muted)
+
+    def test_audio_restore_keeps_unseen_session_if_listing_was_partial_and_pid_alive(self) -> None:
+        fake_session = FakeSession("spotify.exe", 111, muted=0, instance_id="inst1")
+        ctrl = window_audio.AudioMuteController()
+        with patch.object(window_audio.AudioUtilities, "GetAllSessions", return_value=[fake_session]):
+            ctrl.apply(["spotify.exe"], True)
+
+        class BrokenSession:
+            @property
+            def Process(self):  # noqa: N802 (pycaw attribute name)
+                raise RuntimeError("process query failed")
+
+        with (
+            patch.object(window_audio.AudioUtilities, "GetAllSessions", return_value=[BrokenSession()]),
+            patch.object(window_audio.psutil, "pid_exists", return_value=True),
+        ):
+            ctrl.restore()
+        # We couldn't identify every session and the app is still running, so keep tracking it.
+        self.assertTrue(ctrl.is_muted)
+        with (
+            patch.object(window_audio.AudioUtilities, "GetAllSessions", return_value=[BrokenSession()]),
+            patch.object(window_audio.psutil, "pid_exists", return_value=False),
+        ):
+            ctrl.restore()
+        self.assertFalse(ctrl.is_muted)
+
     def test_apply_worker_retries_failed_audio_restore(self) -> None:
         import threading
         import time
@@ -1326,6 +1428,123 @@ class GDQuietTests(unittest.TestCase):
                 st = api.reset_defaults()
                 self.assertEqual(st["cfg"]["mute_at_percent"], config.DEFAULT_CONFIG["mute_at_percent"])
                 self.assertEqual(st["cfg"]["selected_apps"], [])
+            finally:
+                app._cleanup_sync()
+
+    def test_web_ui_eclipse_level_label_loads_profiles_and_account_state(self) -> None:
+        import web_ui
+
+        with (
+            patch.object(web_ui, "load_config", return_value=dict(config.DEFAULT_CONFIG)),
+            patch.object(web_ui, "save_config"),
+            patch.object(web_ui, "list_mute_targets", return_value=[]),
+            patch.object(web_ui, "list_open_window_processes", return_value=["geometrydash.exe"]),
+            patch.object(web_ui, "ScreenPercentWatcher"),
+            patch.object(web_ui.DiscordAuth, "load"),
+        ):
+            app = web_ui.GDQuietWebApp()
+            try:
+                api = web_ui.WebApi(app)
+                st = api.get_state()
+                self.assertIn(st["account"]["status"], {"signed_out", "signed_in"})
+                self.assertEqual(st["level_detection_status"], "Level label reading is off")
+
+                def reading(name: str | None, raw: str = "") -> screen_reader.ScreenReading:
+                    return screen_reader.ScreenReading(
+                        percent=3.0,
+                        raw_text="3%",
+                        should_mute=False,
+                        is_playing=True,
+                        status_text="",
+                        preview_image=None,
+                        level_name_candidate=name,
+                        level_label_raw=raw,
+                    )
+
+                # Ignored while the feature is off.
+                app._on_screen_reading(reading("Stereo Madness"))
+                self.assertEqual(app._active_level_key, "")
+
+                api.set_setting("level_label_enabled", True)
+                api.set_threshold(40)
+                app._on_screen_reading(reading("Stereo Madness", "FPS 240\nStereo Madness"))
+                st = api.get_state()
+                self.assertEqual(st["level_label"]["active_level"], "Stereo Madness")
+                self.assertIn("Stereo Madness", st["level_label"]["last_raw"])
+                self.assertEqual(st["cfg"]["level_profiles"]["stereomadness"]["mute_at_percent"], 40.0)
+
+                # A new level gets its own profile; returning loads the saved one.
+                api.set_threshold(80)
+                app._on_screen_reading(reading("Deadlocked"))
+                api.save_setup()
+                app._on_screen_reading(reading("Stereo Madness"))
+                self.assertEqual(api.get_state()["cfg"]["mute_at_percent"], 40.0)
+                app._on_screen_reading(reading("Deadlocked"))
+                self.assertEqual(api.get_state()["cfg"]["mute_at_percent"], 80.0)
+
+                # The label box is stored separately from the % region.
+                app.cfg["level_label_region"] = {"kind": "window_rel", "rx": 0.01, "ry": 0.4, "rw": 0.2, "rh": 0.05}
+                st = api.get_state()
+                self.assertEqual(st["level_label"]["region_description"], "Custom box")
+                self.assertEqual(st["cfg"]["watch_mode"], "auto_window")
+                st = api.reset_level_region()
+                self.assertIsNone(st["cfg"]["level_label_region"])
+
+                # Levels page: add a level by name, OCR misreads snap to it.
+                st = api.add_level("clubstep startpos", "62")
+                row = next(r for r in st["levels"] if r["key"] == "clubstepstartpos")
+                self.assertEqual(row["threshold"], 62.0)
+                self.assertTrue(row["enabled"])
+                app._on_screen_reading(reading("clubstep sii@ttpos"))
+                st = api.get_state()
+                self.assertEqual(st["level_label"]["active_level"], "clubstep startpos")
+                self.assertEqual(st["cfg"]["mute_at_percent"], 62.0)
+                self.assertNotIn("clubstepsiiattpos", st["cfg"]["level_profiles"])
+
+                # Switched-off levels are recognised but don't change settings.
+                api.set_level_enabled("deadlocked", False)
+                api.set_threshold(33)
+                app._on_screen_reading(reading("Deadlocked"))
+                st = api.get_state()
+                self.assertEqual(st["level_label"]["active_level"], "Deadlocked")
+                self.assertEqual(st["cfg"]["mute_at_percent"], 33.0)
+                api.save_setup()
+                self.assertFalse(api.get_state()["cfg"]["level_profiles"]["deadlocked"]["enabled"])
+                st = api.set_level_enabled("deadlocked", True)
+                self.assertEqual(st["cfg"]["mute_at_percent"], 33.0)
+
+                st = api.set_level_threshold("clubstepstartpos", 70)
+                self.assertEqual(st["cfg"]["level_profiles"]["clubstepstartpos"]["mute_at_percent"], 70.0)
+                st = api.delete_level("deadlocked")
+                self.assertNotIn("deadlocked", st["cfg"]["level_profiles"])
+                self.assertEqual(st["level_label"]["active_level"], "")
+                st = api.add_level("   ")
+                self.assertEqual(st["footer_message"], "Type a level name first.")
+
+                # Beta updates can't be switched on.
+                st = api.set_setting("beta_updates", True)
+                self.assertFalse(st["cfg"]["beta_updates"])
+                self.assertIn("no beta updates", st["beta_updates_notice"])
+            finally:
+                app._cleanup_sync()
+
+    def test_web_ui_turns_off_saved_beta_updates_on_start(self) -> None:
+        import web_ui
+
+        cfg = dict(config.DEFAULT_CONFIG)
+        cfg["beta_updates"] = True
+        with (
+            patch.object(web_ui, "load_config", return_value=cfg),
+            patch.object(web_ui, "save_config") as save,
+            patch.object(web_ui, "list_mute_targets", return_value=[]),
+            patch.object(web_ui, "list_open_window_processes", return_value=["geometrydash.exe"]),
+            patch.object(web_ui, "ScreenPercentWatcher"),
+            patch.object(web_ui.DiscordAuth, "load"),
+        ):
+            app = web_ui.GDQuietWebApp()
+            try:
+                self.assertFalse(app.cfg["beta_updates"])
+                self.assertTrue(save.called)
             finally:
                 app._cleanup_sync()
 

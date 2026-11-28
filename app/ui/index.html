@@ -45,6 +45,11 @@
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="1.8" y="2.5" width="12.4" height="8.5" rx="1"/><path d="M5.5 13.5h5M8 11v2.5"/></svg>
         <span>Screen capture</span>
       </button>
+      <button type="button" data-page="levels" id="nav-levels" hidden>
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 14V2.5"/><path d="M3.5 3h8.5l-1.8 2.8L12 8.5H3.5"/></svg>
+        <span>Levels</span>
+        <span class="beta-tag">Beta</span>
+      </button>
       <button type="button" data-page="settings">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1"/></svg>
         <span>Settings</span>
@@ -52,6 +57,18 @@
     </nav>
 
     <div class="sidebar-bottom">
+      <div class="account" id="account">
+        <div class="acct-in" id="acct-in" hidden>
+          <span class="acct-avatar" id="acct-avatar-wrap"><img id="acct-avatar" alt="" /><span id="acct-initial"></span></span>
+          <div class="acct-name"><b id="acct-name"></b><span id="acct-handle"></span></div>
+          <button type="button" class="acct-signout" id="acct-signout-btn">Sign out</button>
+        </div>
+        <button type="button" class="btn discord block" id="acct-signin-btn">
+          <span id="acct-signin-txt">Sign in with Discord</span>
+        </button>
+        <div class="acct-msg" id="acct-msg" hidden></div>
+      </div>
+
       <div class="status-box">
         <div class="status-top">
           <span class="watcher-head" id="watcher-head"><span class="dot"></span><span id="watcher-state-txt">Watching</span></span>
@@ -94,19 +111,6 @@
         <div class="banner-actions">
           <button type="button" class="btn primary sm" id="downgrade-banner-btn">Downgrade to stable</button>
           <button type="button" class="btn ghost sm" id="downgrade-banner-later">Later</button>
-        </div>
-      </div>
-
-      <div class="banner level" id="level-banner">
-        <span id="level-banner-txt"></span>
-        <div class="banner-actions">
-          <button type="button" class="btn primary sm" id="level-yes">Yes</button>
-          <button type="button" class="btn ghost sm" id="level-correct">Correct</button>
-          <button type="button" class="btn ghost sm" id="level-later">Later</button>
-        </div>
-        <div class="level-corr" id="level-corr-row">
-          <input id="level-corr-input" type="text" placeholder="Enter exact level name" />
-          <button type="button" class="btn primary sm" id="level-corr-save">Save correction</button>
         </div>
       </div>
 
@@ -173,8 +177,8 @@
               <div class="kv static">
                 <span>Level profile</span>
                 <div class="kv-right">
-                  <b id="ov-level-profile">No confirmed level profile</b>
-                  <span class="kv-sub" id="ov-level-status">Level detection beta is off</span>
+                  <b id="ov-level-profile">No level detected yet</b>
+                  <span class="kv-sub" id="ov-level-status">Level label reading is off</span>
                 </div>
               </div>
               <div class="panel-foot">
@@ -464,6 +468,67 @@
         </div>
       </section>
 
+      <!-- ==================== LEVELS (beta) ==================== -->
+      <section class="view" id="view-levels">
+        <div class="page-head">
+          <h1>Levels <span class="beta-tag">Beta</span></h1>
+          <span class="saved"><span class="saved-txt">Saved</span></span>
+        </div>
+
+        <div class="cols-cap">
+          <div class="stack">
+            <div class="panel-group">
+              <div class="panel-title">Your levels</div>
+              <div class="panel pad">
+                <p class="cap-note">Each level keeps its own threshold, apps and capture region. When GD Quiet reads a level's name it loads these settings. Switch a level off to keep its name but stop it changing your settings.</p>
+                <form class="lvl-add" id="lvl-add-form" autocomplete="off">
+                  <input class="inp lvl-add-name" id="lvl-add-name" type="text" maxlength="80" placeholder="Level name, e.g. clubstep startpos" aria-label="Level name" />
+                  <div class="val lvl-add-pct"><input class="inp" id="lvl-add-threshold" type="text" inputmode="decimal" placeholder="50" aria-label="Threshold percent" /><span class="unit">%</span></div>
+                  <button type="submit" class="btn primary sm">Add level</button>
+                </form>
+                <div class="lvl-list" id="lvl-list"></div>
+                <div class="lvl-empty" id="lvl-empty">No levels yet. Add one above, or play a level with the Eclipse label showing and it'll appear here.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="stack">
+            <div class="panel-group">
+              <div class="panel-title">Set up the Eclipse label</div>
+              <div class="panel pad">
+                <ol class="steps">
+                  <li>Install the <b>Eclipse</b> mod menu with <b>Geode</b>.</li>
+                  <li>In Geometry Dash, press <kbd>Tab</kbd> to open Eclipse.</li>
+                  <li>Open <b>Labels</b> and choose <b>Add new label</b>.</li>
+                  <li>Type <code>{levelName}</code> as the label text.</li>
+                  <li>Play a level. The name appears on the left side of the screen and GD Quiet picks it up.</li>
+                </ol>
+                <div class="foot-note">Keep the label on the left side with Eclipse's other labels. Watching must be on for levels to be read.</div>
+              </div>
+            </div>
+
+            <div class="panel-group">
+              <div class="panel-title">Label box</div>
+              <div class="panel pad">
+                <p class="cap-note">By default GD Quiet reads the left 30% of the game window. Drawing a box tightly around the level-name label is the most reliable.</p>
+                <div class="custom">
+                  <button type="button" class="btn primary sm" id="lvl-drag-btn">Drag box on screen</button>
+                  <button type="button" class="btn ghost sm" id="lvl-delay-btn">Pick with 3s delay</button>
+                  <button type="button" class="btn ghost sm" id="lvl-reset-btn">Use left 30%</button>
+                </div>
+                <div class="current">
+                  <span>Label box:</span> <strong id="lvl-region-desc">Default · left 30% of the game window</strong>
+                </div>
+                <div class="lvl-detected">
+                  <span>Detected level:</span> <strong id="lvl-active">None yet</strong>
+                </div>
+                <div class="ocr lvl-raw" id="lvl-raw">Raw OCR: (waiting)</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- ==================== SETTINGS ==================== -->
       <section class="view" id="view-settings">
         <div class="page-head">
@@ -505,8 +570,8 @@
               <div class="togrow"><span>Enable Discord auto-deafen</span><button type="button" class="toggle" data-bool-key="auto_deafen" aria-label="Enable Discord auto-deafen"></button></div>
               <div class="setrow"><span class="l">Discord hotkey toggle cooldown</span><div class="val"><input class="inp" data-num-key="discord_cooldown_ms" /><span class="unit">ms</span></div><button type="button" class="apply" data-apply-key="discord_cooldown_ms">Apply</button></div>
               <div class="togrow">
-                <div><span>Detect level names (beta)</span><span class="sub-desc">Reads pause-screen level titles locally for per-level profiles.</span></div>
-                <button type="button" class="toggle" data-bool-key="level_detection_beta" aria-label="Detect level names"></button>
+                <div><span>Per-level profiles from Eclipse label <span class="beta-tag">Beta</span></span><span class="sub-desc">Reads the Eclipse {levelName} label to load each level's settings. Adds a Levels tab to the sidebar.</span></div>
+                <button type="button" class="toggle" data-bool-key="level_label_enabled" aria-label="Read level name from Eclipse label"></button>
               </div>
             </div>
           </div>

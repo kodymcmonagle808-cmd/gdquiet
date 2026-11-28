@@ -11,15 +11,15 @@ Standalone Windows app (`GDQuiet.exe`) that reads your level percentage directly
 - **Discord Auto-Deafen:** Record your Discord **Toggle Deafen** hotkey so Discord automatically deafens above your threshold and undeafens on death, exit, or 100%.
 - **Global % Checks Toggle Keybind:** Bind a global Windows keybind on **Overview** to pause or resume `%` watching and audio muting anytime, even while Geometry Dash is focused.
 - **OBS Studio Overlay:** Add a local Browser Source to show live progress, mute state, and threshold, with controls to pause watching or adjust the threshold.
-- **Per-Level Profiles:** After confirming a detected level, save a per-level threshold, app selection, and capture region locally; matching saved profiles load when you confirm that level again.
+- **Per-Level Profiles (Beta):** Each level gets its own local threshold, app selection, and capture region. Profiles load automatically when GD Quiet reads the level name from the Eclipse `{levelName}` label. Manage them on the **Levels** tab: add a level by name, set its threshold, or switch it on or off.
 - **OCR Diagnostics:** Preview the captured region, recognized text, scan time, and consecutive missed reads to help calibrate screen capture.
 - **System Tray Controls:** Pause watching, toggle mute, reopen the window, or exit from the tray; optionally close the window to the tray.
-- **Level Name Detection (Beta):** Optional, opt-in OCR reads level names only when visible on a pause screen. It never pauses the game; confirmations and corrections stay on this device.
+- **Sign in with Discord:** Optional Discord sign-in through Supabase. The session is stored on this PC, encrypted to your Windows account.
 - **Setup Wizard & Built-in Updater:** Distributed exclusively through `GDQuiet-Setup.exe` (accept terms, pick install folder/shortcuts), plus quick `%` position presets (**Top Center**, **Top Left**, **Top Right**, **Bottom Center**) and region box picker.
 
 ## Usage
 
-1. Download and run **`GDQuiet-Setup.exe`** from the Releases page to walk through the Setup Wizard (accept terms, choose install folder/shortcuts, then launch GD Quiet). Future stable updates can be installed directly inside the app via **Check for Updates**. Prerelease updates are hidden unless you opt in under **Settings → Beta Updates**.
+1. Download and run **`GDQuiet-Setup.exe`** from the Releases page to walk through the Setup Wizard (accept terms, choose install folder/shortcuts, then launch GD Quiet). Future stable updates can be installed directly inside the app via **Check for Updates**. Beta updates are currently unavailable, so every install stays on stable releases.
 2. In Geometry Dash **Graphics** settings, use **Windowed** or **Borderless** mode and make sure **Show Percentage** is enabled.
 3. In `GDQuiet.exe`:
    - Check the open windows/apps whose audio you want changed.
@@ -30,7 +30,11 @@ Standalone Windows app (`GDQuiet.exe`) that reads your level percentage directly
    - *(Optional)* In **Settings → OBS Studio Overlay**, enable the local server and add the shown URL as a 560 × 300 OBS **Browser Source**. Right-click the source and choose **Interact** to use its controls. The overlay is served only from this computer.
    - *(Optional)* In **Settings → Audio Action**, choose **Mute** or **Duck**, then set the ducked volume. The app restores only volume changes it made.
    - *(Optional)* Set **Fade Audio Before Threshold** to **Slow** or **Fast** to lower selected-app volume before the threshold; the configured audio action takes over at the threshold.
-   - *(Optional)* Confirm a detected level to create or load its local profile. Adjust threshold, selected apps, and capture region as usual, then choose **Save Current Settings** on Overview.
    - *(Optional)* Use the **Screen Capture** page's OCR diagnostics to inspect recognized text and consecutive missed reads.
    - *(Optional)* Use the system tray menu to pause/resume, toggle mute, open the window, or exit. Enable **Close to System Tray** in Settings if you want the close button to hide the window instead of exiting.
-   - *(Optional)* Level name detection remains opt-in under **Settings → Experimental Features (Beta)**. It is off by default and only scans while screen watching is active; confirm or correct each detected title in GD Quiet. Feedback and profiles are saved locally.
+   - *(Optional, beta)* Per-level profiles from Eclipse:
+     1. In Geometry Dash (with Geode and the Eclipse mod menu), press **Tab** to open Eclipse.
+     2. Go to **Labels**, choose **Add new label**, and type `{levelName}`.
+     3. In GD Quiet, turn on **Settings → Per-level profiles from Eclipse label (Beta)**. A **Levels** tab appears in the sidebar.
+     4. Play a level: its name is read from the left 30% of the game window and its profile is created or loaded. On the **Levels** tab you can add levels by name, change each level's threshold, switch levels on or off, and drag a tighter box around the label if needed.
+   - *(Optional)* Click **Sign in with Discord** in the sidebar to link your Discord account.

@@ -7,11 +7,12 @@ import re
 import threading
 import time
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from typing import Any, Callable
 
 import mss
 import psutil
-from PIL import Image, ImageChops, ImageOps
+from PIL import Image, ImageChops, ImageFilter, ImageOps
 import winrt.windows.graphics.imaging as wgi
 import winrt.windows.media.ocr as wmo
 import winrt.windows.storage.streams as wss
@@ -39,20 +40,24 @@ _LUMA_LUT = [255 if v < 165 else max(0, 255 - int((v - 165) * 2.8)) for v in ran
 _DARK_INK_MASK = [255 if v < 245 else 0 for v in range(256)]
 
 _PERCENT_RE = re.compile(r"(\d{1,3}(?:[.,]\d{1,2})?)\s*%")
-_PAUSE_MENU_MARKER_RE = re.compile(r"\b(?:resume|restart|practice|normal mode|attempts?)\b", re.IGNORECASE)
-_LEVEL_MENU_LABELS = {
-    "attempt",
-    "attempts",
-    "best",
-    "exit",
-    "level complete",
-    "normal mode",
-    "paused",
-    "practice",
-    "resume",
-    "restart",
-    "settings",
-}
+# Default box for the Eclipse level-name label: the left 30% of the game window.
+DEFAULT_LEVEL_LABEL_REGION: dict[str, Any] = {"kind": "window_rel", "rx": 0.0, "ry": 0.0, "rw": 0.30, "rh": 1.0}
+
+# Other Eclipse labels that can share the left side of the screen with the level name.
+# A line is treated as a stat when it starts with one of these words and contains a number.
+_LABEL_STAT_RE = re.compile(
+    r"^(?:fps|cps|tps|attempts?|att|from|noclip|accuracy|deaths?|jumps?|clicks?|session|time|clock|"
+    r"best|run|frames?|ping|speed|progress|level\s*id|id|cheat\w*|startpos|checkpoints?)\b",
+    re.IGNORECASE,
+)
+_LABEL_STAT_WORDS = frozenset(
+    {"fps", "cps", "tps", "attempt", "attempts", "from", "noclip", "accuracy", "deaths", "jumps",
+     "clicks", "session", "best", "run", "frames", "progress", "checkpoints"}
+)
+_LABEL_ALWAYS_STAT_WORDS = frozenset({"attempt", "attempts"})
+_LABEL_STATUS_WORDS = frozenset(
+    {"testmode", "noclip", "cheating", "cheat", "safemode", "practice", "practicemode", "startpos", "paused"}
+)
 
 _WINDOW_CACHE_LOCK = threading.Lock()
 _WINDOW_CACHE: dict[str, tuple[int, float]] = {}
@@ -188,6 +193,37 @@ def find_window_client_rect(process_name: str) -> tuple[int, int, int, int] | No
     return best_rect
 
 
+def compute_region_rect(
+    region: dict[str, Any],
+    target_process: str,
+) -> tuple[dict[str, int] | None, str] | None:
+    """Resolve a saved region ("window_rel" or "screen") to an mss monitor dict.
+
+    Returns None when the region dict is not a recognised kind.
+    """
+    kind = region.get("kind")
+    if kind == "window_rel":
+        proc = str(region.get("process") or target_process or "geometrydash.exe")
+        rect = find_window_client_rect(proc)
+        if rect is None:
+            return None, f"Waiting for {proc} window..."
+        wx, wy, ww, wh = rect
+        left = wx + int(round(float(region["rx"]) * ww))
+        top = wy + int(round(float(region["ry"]) * wh))
+        width = max(24, int(round(float(region["rw"]) * ww)))
+        height = max(18, int(round(float(region["rh"]) * wh)))
+        return {"left": left, "top": top, "width": width, "height": height}, proc
+
+    if kind == "screen":
+        left = int(region.get("left", 0))
+        top = int(region.get("top", 0))
+        width = max(24, int(region.get("width", 200)))
+        height = max(18, int(region.get("height", 80)))
+        return {"left": left, "top": top, "width": width, "height": height}, "Custom screen region"
+
+    return None
+
+
 def compute_capture_rect(
     watch_mode: str,
     target_process: str,
@@ -195,25 +231,9 @@ def compute_capture_rect(
 ) -> tuple[dict[str, int] | None, str]:
     """Return (mss monitor dict, human status label) for the current watch target."""
     if watch_mode == "custom_region" and isinstance(custom_region, dict):
-        kind = custom_region.get("kind")
-        if kind == "window_rel":
-            proc = str(custom_region.get("process") or target_process or "geometrydash.exe")
-            rect = find_window_client_rect(proc)
-            if rect is None:
-                return None, f"Waiting for {proc} window..."
-            wx, wy, ww, wh = rect
-            left = wx + int(round(float(custom_region["rx"]) * ww))
-            top = wy + int(round(float(custom_region["ry"]) * wh))
-            width = max(24, int(round(float(custom_region["rw"]) * ww)))
-            height = max(18, int(round(float(custom_region["rh"]) * wh)))
-            return {"left": left, "top": top, "width": width, "height": height}, proc
-
-        if kind == "screen":
-            left = int(custom_region.get("left", 0))
-            top = int(custom_region.get("top", 0))
-            width = max(24, int(custom_region.get("width", 200)))
-            height = max(18, int(custom_region.get("height", 80)))
-            return {"left": left, "top": top, "width": width, "height": height}, "Custom screen region"
+        result = compute_region_rect(custom_region, target_process)
+        if result is not None:
+            return result
 
     proc = (target_process or "geometrydash.exe").strip()
     rect = find_window_client_rect(proc)
@@ -305,64 +325,176 @@ def normalize_level_name(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", (name or "").casefold())
 
 
-_LEVEL_MENU_LABELS_NORMALIZED = frozenset(normalize_level_name(label) for label in _LEVEL_MENU_LABELS)
+def level_name_similarity(a: str, b: str) -> float:
+    """0..1 similarity of two level names, ignoring case, spaces and punctuation."""
+    ka, kb = normalize_level_name(a), normalize_level_name(b)
+    if not ka or not kb:
+        return 0.0
+    if ka == kb:
+        return 1.0
+    return SequenceMatcher(None, ka, kb).ratio()
 
 
-def extract_level_name_from_pause_text(text: str) -> str | None:
-    lines = [re.sub(r"\s+", " ", line).strip(" \t|:•-") for line in (text or "").splitlines()]
-    if not any(_PAUSE_MENU_MARKER_RE.search(line) for line in lines):
-        return None
+@dataclass
+class OcrLine:
+    """One OCR line with the left/top of its first word, in source-image pixels."""
 
-    for line in lines:
-        candidate = re.sub(r"^level(?:\s+name)?\s*[:\-]\s*", "", line, flags=re.IGNORECASE).strip()
-        normalized = normalize_level_name(candidate)
-        if (
-            len(candidate) > 48
-            or len(normalized) < 3
-            or "%" in candidate
-            or normalized in _LEVEL_MENU_LABELS_NORMALIZED
-            or re.search(r"\b(?:attempts?|normal mode|practice|resume|restart)\b", candidate, re.IGNORECASE)
-        ):
+    text: str
+    x: float = 0.0
+    y: float = 0.0
+
+
+_OCR_LETTER_FIXES = str.maketrans({"+": "t", "|": "l", "!": "l", "1": "l", "0": "o", "4": "a", "@": "a", "5": "s", "$": "s"})
+
+
+def _first_token_letters(line: str) -> str:
+    """Letters of the first whitespace-separated token, undoing common OCR swaps
+    ("At+emptl" -> "attemptl", "c!ubstep" -> "clubstep")."""
+    token = (line or "").strip().split(" ", 1)[0].casefold().translate(_OCR_LETTER_FIXES)
+    return re.sub(r"[^a-z]", "", token)
+
+
+def _fuzzy_prefix(letters: str, keyword: str, cutoff: float) -> bool:
+    if not letters:
+        return False
+    if letters.startswith(keyword):
+        return True
+    if len(keyword) < 4 or len(letters) < 4:
+        return False
+    return SequenceMatcher(None, letters[: len(keyword) + 1], keyword).ratio() >= cutoff
+
+
+def _is_label_stat_line(line: str) -> bool:
+    normalized = normalize_level_name(line)
+    if normalized in _LABEL_STATUS_WORDS or normalized in _LABEL_STAT_WORDS:
+        return True
+    if "%" in line:
+        return True
+    digits =len(re.findall(r"\d", line))
+    letters_total = len(re.findall(r"[A-Za-z]", line))
+    has_digit = digits > 0
+    first = _first_token_letters(line)
+    # "Attempt 180" is also drawn huge in the middle of the screen and often comes
+    # back garbled ("Attematq 4)", "At+emptl", "AtternpU"), so match it loosely
+    # even without digits.
+    if first.startswith("at") and any(_fuzzy_prefix(first, kw, 0.6) for kw in _LABEL_ALWAYS_STAT_WORDS):
+        return True
+    if has_digit and (
+        _LABEL_STAT_RE.search(line) or any(_fuzzy_prefix(first, kw, 0.75) for kw in _LABEL_STAT_WORDS)
+    ):
+        return True
+    # "Label: 123" style stats, including OCR reading the colon as . or ; ("cess. 240").
+    if re.search(r":\s*[\d\-]", line):
+        return True
+    if re.fullmatch(r"\W*[A-Za-z]{1,6}[.:;,]\s*[\d.,/\-]+\W*", line):
+        return True
+    # Counters such as "0/0/0 CPS" (OCR sometimes reads 0 as o/O).
+    if re.match(r"^\W*[\doO]+\s*/\s*[\doO]+", line):
+        return True
+    if re.search(r"\b(?:cps|fps|tps)\b", line, re.IGNORECASE) and has_digit:
+        return True
+    # Mostly numbers ("cess. 240", "-58.550/0"), clocks (12:34:56) and counters.
+    if digits >= 3 and digits >= letters_total:
+        return True
+    if re.fullmatch(r"[\d\s:.,/\-]+", line):
+        return True
+    if re.search(r"\d{1,2}:\d{2}", line):
+        return True
+    return False
+
+
+def _clean_label_line(raw_line: str) -> str:
+    line = re.sub(r"\s+", " ", raw_line).strip(" \t|•-")
+    return re.sub(r"^level(?:\s+name)?\s*[:\-]\s*", "", line, flags=re.IGNORECASE).strip()
+
+
+def _is_plausible_name(line: str) -> bool:
+    normalized = normalize_level_name(line)
+    if len(normalized) < 2 or len(line) > 60:
+        return False
+    letters = len(re.findall(r"[A-Za-z]", line))
+    # Mostly symbols/noise ("{(@ &") is OCR garbage, not a name.
+    return letters >= 2 and letters >= len(normalized) * 0.5
+
+
+def pick_level_name(lines: list[OcrLine], align_tolerance: float = 10.0) -> str | None:
+    """Pick the level name from OCR lines of the Eclipse label region.
+
+    Eclipse stacks its labels with a shared left edge. When stat labels (FPS,
+    attempts, CPS, %) are visible, only lines starting at that same left edge
+    are considered, which filters out other overlays and in-game text. The
+    first remaining line that isn't a stat is the level name. When the box was
+    drawn tightly around just the level-name label, there are no stat lines
+    and the first plausible line wins.
+    """
+    cleaned = [(OcrLine(_clean_label_line(line.text), line.x, line.y)) for line in lines]
+    cleaned = [line for line in cleaned if line.text]
+    stat_xs = sorted(line.x for line in cleaned if _is_label_stat_line(line.text) and re.search(r"[A-Za-z]", line.text))
+    anchor_x: float | None = stat_xs[len(stat_xs) // 2] if stat_xs else None
+    for line in cleaned:
+        if anchor_x is not None and abs(line.x - anchor_x) > align_tolerance:
             continue
-        if re.search(r"[A-Za-z]", candidate):
-            return candidate
+        if not _is_plausible_name(line.text) or _is_label_stat_line(line.text):
+            continue
+        return line.text
     return None
 
 
+def extract_level_name_from_label_text(text: str) -> str | None:
+    """Text-only version of pick_level_name (no position information)."""
+    return pick_level_name([OcrLine(line) for line in (text or "").splitlines()])
+
+
+def prepare_label_image(img: Image.Image) -> tuple[Image.Image, float]:
+    """Sharpen and upscale the label crop for OCR. Eclipse labels are small and
+    semi-transparent; Windows OCR reads them far more reliably this way.
+    Returns (image, scale)."""
+    scale = 3 if img.height <= 240 else 2
+    sharp = img.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=3))
+    big = sharp.resize((img.width * scale, img.height * scale), Image.Resampling.LANCZOS)
+    return big, float(scale)
+
+
 class LevelNameTracker:
-    """Emits a pause-menu level title only after two matching OCR scans."""
+    """Emits a level name once it shows up in 2 of the last 5 OCR scans.
+
+    OCR of semi-transparent labels over a moving background is noisy, so reads
+    count as the same name when they're close, missed reads don't break the
+    run, and the most common spelling wins. A name that was already reported
+    is not reported again until a different level shows up (or reset()).
+    """
+
+    SIMILAR = 0.8
+    WINDOW = 5
+    NEEDED = 2
 
     def __init__(self) -> None:
-        self._candidate_key = ""
-        self._candidate_text = ""
-        self._candidate_count = 0
-        self._reported_key = ""
+        self._recent: list[str] = []
+        self._reported_text = ""
 
     def reset(self) -> None:
-        self._candidate_key = ""
-        self._candidate_text = ""
-        self._candidate_count = 0
-        self._reported_key = ""
+        self._recent = []
+        self._reported_text = ""
 
     def update(self, candidate: str | None) -> str | None:
-        key = normalize_level_name(candidate or "")
-        if not key:
-            self.reset()
+        text = (candidate or "").strip()
+        self._recent.append(text if normalize_level_name(text) else "")
+        self._recent = self._recent[-self.WINDOW :]
+        if not self._recent[-1]:
             return None
 
-        if key == self._candidate_key:
-            self._candidate_count += 1
-            self._candidate_text = candidate or self._candidate_text
-        else:
-            self._candidate_key = key
-            self._candidate_text = candidate or ""
-            self._candidate_count = 1
-            self._reported_key = ""
-
-        if self._candidate_count >= 2 and self._reported_key != key:
-            self._reported_key = key
-            return self._candidate_text
-        return None
+        cluster = [r for r in self._recent if r and level_name_similarity(r, text) >= self.SIMILAR]
+        if len(cluster) < self.NEEDED:
+            return None
+        counts: dict[str, int] = {}
+        for r in cluster:
+            counts[r] = counts.get(r, 0) + 1
+        # Most common spelling; ties go to the most recent read.
+        best = max(reversed(cluster), key=lambda r: counts[r])
+        if self._reported_text and level_name_similarity(best, self._reported_text) >= self.SIMILAR:
+            return None
+        self._reported_text = best
+        return best
 
 
 class WinRtPercentOcr:
@@ -408,6 +540,43 @@ class WinRtPercentOcr:
         )
         res = self._loop.run_until_complete(self._engine.recognize_async(sb))
         return str(getattr(res, "text", "") or "").strip()
+
+    def recognize_lines(self, rgba_img: Image.Image) -> str:
+        """Like recognize_text, but keeps each OCR line on its own line.
+
+        OcrResult.text joins every line with spaces, which merges stacked labels
+        (e.g. "FPS: 240" and the level name) into one string.
+        """
+        return "\n".join(line.text for line in self.recognize_line_boxes(rgba_img))
+
+    def recognize_line_boxes(self, rgba_img: Image.Image, scale: float = 1.0) -> list[OcrLine]:
+        """OCR lines with the position of each line's first word, divided by `scale`."""
+        if self._engine is None:
+            return []
+        img = rgba_img if rgba_img.mode == "RGBA" else rgba_img.convert("RGBA")
+        dw = wss.DataWriter()
+        dw.write_bytes(img.tobytes())
+        ibuf = dw.detach_buffer()
+        sb = wgi.SoftwareBitmap.create_copy_from_buffer(
+            ibuf,
+            wgi.BitmapPixelFormat.RGBA8,
+            img.width,
+            img.height,
+        )
+        res = self._loop.run_until_complete(self._engine.recognize_async(sb))
+        out: list[OcrLine] = []
+        for line in getattr(res, "lines", None) or []:
+            text = str(getattr(line, "text", "") or "").strip()
+            if not text:
+                continue
+            x = y = 0.0
+            try:
+                rect = next(iter(line.words)).bounding_rect
+                x, y = float(rect.x) / scale, float(rect.y) / scale
+            except Exception:
+                pass
+            out.append(OcrLine(text, x, y))
+        return out
 
     def read_percent_with_meta(
         self,
@@ -489,7 +658,6 @@ class PercentStateDebouncer:
                 if gap >= effective_timeout:
                     self.is_muted = False
                     self.last_percent = None
-                    self._high_streak = 0
                     return False, False
                 return self.is_muted, True
             return False, False
@@ -530,6 +698,7 @@ class ScreenReading:
     level_name_candidate: str | None = None
     level_detection_error: str | None = None
     consecutive_missed_reads: int = 0
+    level_label_raw: str | None = None
 
 
 class ScreenTestSession:
@@ -640,6 +809,11 @@ class ScreenPercentWatcher:
         self._thread: threading.Thread | None = None
         self._debouncer = PercentStateDebouncer()
         self._level_name_tracker = LevelNameTracker()
+        self._level_lock = threading.Lock()
+        self._level_pending_candidate: str | None = None
+        self._level_pending_raw: str | None = None
+        self._level_pending_error: str | None = None
+        self._level_thread: threading.Thread | None = None
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -647,6 +821,8 @@ class ScreenPercentWatcher:
         self._stop.clear()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
+        self._level_thread = threading.Thread(target=self._level_loop, daemon=True)
+        self._level_thread.start()
 
     def stop(self) -> None:
         self._stop.set()
@@ -689,25 +865,83 @@ class ScreenPercentWatcher:
         return None, raw_text, last_x_frac, prefer_luma
 
     @staticmethod
-    def _scan_level_name(sct: Any, ocr: WinRtPercentOcr, process_name: str) -> str | None:
-        rect = find_window_client_rect(process_name)
-        if rect is None:
-            return None
-        x, y, width, height = rect
-        # Capture only the top ~40% of the window where the pause menu title appears,
-        # reducing OCR noise from gameplay elements and improving scan speed.
-        scan_height = max(80, int(height * 0.40))
-        shot = sct.grab({"left": x, "top": y, "width": width, "height": scan_height})
+    def _scan_level_label(
+        sct: Any,
+        ocr: WinRtPercentOcr,
+        region: dict[str, Any] | None,
+        target_process: str,
+    ) -> tuple[str | None, str | None]:
+        """OCR the Eclipse level-name label box.
+
+        Returns (level name or None, raw OCR text). Raw text is None when the
+        game window isn't available.
+        """
+        reg = region if isinstance(region, dict) and region.get("kind") else DEFAULT_LEVEL_LABEL_REGION
+        resolved = compute_region_rect(reg, target_process)
+        if resolved is None or resolved[0] is None:
+            return None, None
+        shot = sct.grab(resolved[0])
         img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
-        text = ocr.recognize_text(img.convert("RGBA"))
-        return extract_level_name_from_pause_text(text)
+        big, scale = prepare_label_image(img)
+        lines = ocr.recognize_line_boxes(big, scale=scale)
+        raw = "\n".join(line.text for line in lines)
+        tolerance = max(10.0, img.width * 0.02)
+        return pick_level_name(lines, align_tolerance=tolerance), raw
+
+    def _post_level_result(self, candidate: str | None, raw: str | None, error: str | None) -> None:
+        with self._level_lock:
+            if candidate:
+                self._level_pending_candidate = candidate
+            if raw is not None:
+                self._level_pending_raw = raw
+            self._level_pending_error = error
+
+    def _take_level_result(self) -> tuple[str | None, str | None, str | None]:
+        with self._level_lock:
+            result = (self._level_pending_candidate, self._level_pending_raw, self._level_pending_error)
+            self._level_pending_candidate = None
+            self._level_pending_raw = None
+            self._level_pending_error = None
+        return result
+
+    def _level_loop(self) -> None:
+        """Reads the Eclipse level label about once a second on its own thread.
+
+        It has its own OCR engine and screen grabber so the ~100 ms label scan
+        never delays the percentage loop (and therefore never delays a mute).
+        """
+        ocr = WinRtPercentOcr()
+        try:
+            with mss.MSS() as sct:
+                while not self._stop.is_set():
+                    cfg = self._get_settings()
+                    if (
+                        not cfg.get("watch_enabled", True)
+                        or not cfg.get("level_label_enabled", False)
+                        or not ocr.available()
+                    ):
+                        self._level_name_tracker.reset()
+                        self._stop.wait(0.5)
+                        continue
+                    target_process = str(cfg.get("target_process") or "geometrydash.exe")
+                    try:
+                        title, raw = self._scan_level_label(sct, ocr, cfg.get("level_label_region"), target_process)
+                    except Exception as exc:
+                        self._post_level_result(None, None, str(exc))
+                    else:
+                        if raw is None:
+                            # Game window closed: re-arm so reopening the level reloads its profile.
+                            self._level_name_tracker.reset()
+                        self._post_level_result(self._level_name_tracker.update(title), raw, None)
+                    self._stop.wait(1.0)
+        finally:
+            ocr.close()
 
     def _run(self) -> None:
         ocr = WinRtPercentOcr()
         try:
             with mss.MSS() as sct:
                 last_preview_at = 0.0
-                last_level_scan_at = 0.0
                 last_x_frac: float | None = None
                 prefer_luma = False
                 last_target_key: tuple[str, str] | None = None
@@ -737,7 +971,6 @@ class ScreenPercentWatcher:
                         last_x_frac = None
                         last_good_rect = None
                         self._debouncer.reset()
-                        self._level_name_tracker.reset()
                         self._on_reading(
                             ScreenReading(
                                 percent=None,
@@ -754,7 +987,6 @@ class ScreenPercentWatcher:
                     if not ocr.available():
                         last_good_rect = None
                         self._debouncer.reset()
-                        self._level_name_tracker.reset()
                         self._on_reading(
                             ScreenReading(
                                 percent=None,
@@ -784,7 +1016,6 @@ class ScreenPercentWatcher:
                             last_good_rect = None
                             last_x_frac = None
                             self._debouncer.reset()
-                            self._level_name_tracker.reset()
                             self._on_reading(
                                 ScreenReading(
                                     percent=None,
@@ -836,28 +1067,7 @@ class ScreenPercentWatcher:
                     consecutive_missed_reads = consecutive_missed_reads + 1 if pct is None else 0
 
                     now = time.monotonic()
-                    level_name_candidate: str | None = None
-                    level_detection_error: str | None = None
-                    if cfg.get("level_detection_beta", False):
-                        if now - last_level_scan_at >= 1.0:
-                            last_level_scan_at = now
-                            level_process = target_process
-                            region = cfg.get("custom_region")
-                            if (
-                                watch_mode == "custom_region"
-                                and isinstance(region, dict)
-                                and region.get("kind") == "window_rel"
-                            ):
-                                level_process = str(region.get("process") or target_process)
-                            try:
-                                title = self._scan_level_name(sct, ocr, level_process)
-                            except Exception as exc:
-                                self._level_name_tracker.reset()
-                                level_detection_error = str(exc)
-                            else:
-                                level_name_candidate = self._level_name_tracker.update(title)
-                    else:
-                        self._level_name_tracker.reset()
+                    level_name_candidate, level_label_raw, level_detection_error = self._take_level_result()
 
                     preview: Image.Image | None = None
                     if (now - last_preview_at) >= preview_interval_s:
@@ -887,6 +1097,7 @@ class ScreenPercentWatcher:
                             level_name_candidate=level_name_candidate,
                             level_detection_error=level_detection_error,
                             consecutive_missed_reads=consecutive_missed_reads,
+                            level_label_raw=level_label_raw,
                         )
                     )
                     self._stop.wait(play_wait_s if is_playing else idle_wait_s)
