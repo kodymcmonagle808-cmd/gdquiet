@@ -39,6 +39,47 @@
       .replace(/"/g, "&quot;");
   }
 
+  // Minimal, safe Markdown for release notes: headings, "-"/"*" bullet lists,
+  // **bold** and `code`. Text is HTML-escaped before any formatting is added.
+  function renderNotesMarkdown(md) {
+    const inline = (text) =>
+      escapeHtml(text)
+        .replace(/`([^`]+)`/g, "<code>$1</code>")
+        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    const out = [];
+    let inList = false;
+    const closeList = () => {
+      if (inList) {
+        out.push("</ul>");
+        inList = false;
+      }
+    };
+    for (const rawLine of String(md || "").split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || /^(-{3,}|\*{3,}|_{3,})$/.test(line)) {
+        closeList();
+        continue;
+      }
+      const heading = line.match(/^#{1,6}\s+(.*)$/);
+      const bullet = line.match(/^[-*•]\s+(.*)$/);
+      if (heading) {
+        closeList();
+        out.push(`<div class="pn-head">${inline(heading[1])}</div>`);
+      } else if (bullet) {
+        if (!inList) {
+          out.push("<ul>");
+          inList = true;
+        }
+        out.push(`<li>${inline(bullet[1])}</li>`);
+      } else {
+        closeList();
+        out.push(`<p>${inline(line)}</p>`);
+      }
+    }
+    closeList();
+    return out.join("");
+  }
+
   async function mutate(fn) {
     if (!api()) return null;
     mutationEpoch += 1;
@@ -558,10 +599,15 @@
           notes = "";  // entire body is install instructions, no patch notes
         }
         if (notes) {
-          notesEl.textContent = notes;
+          // Only re-render when the notes change, so polling doesn't reset the scroll position.
+          if (notesEl.dataset.raw !== notes) {
+            notesEl.dataset.raw = notes;
+            notesEl.innerHTML = renderNotesMarkdown(notes);
+          }
           notesEl.style.display = "block";
         } else {
-          notesEl.textContent = "";
+          notesEl.dataset.raw = "";
+          notesEl.innerHTML = "";
           notesEl.style.display = "none";
         }
       }
