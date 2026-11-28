@@ -480,7 +480,7 @@
             <div class="panel-group">
               <div class="panel-title">Your levels</div>
               <div class="panel pad">
-                <p class="cap-note">When GD Quiet reads a level that's switched on, it turns watching on and uses that level's %. Add the level ID so levels with the same name stay separate: when an ID is shown, levels are matched by ID only. Levels that are switched off are recognised but change nothing.</p>
+                <p class="cap-note">When GD Quiet reads a level that's switched on, it turns watching on and uses that level's %. While you play it, the overall % and the level's % stay in sync, and typing a level's % switches it on. Add the level ID so levels with the same name stay separate: when an ID is shown, levels are matched by ID only. Levels that are switched off are recognised but change nothing.</p>
                 <div class="lvl-sync" id="lvl-sync">
                   <span class="dot" id="lvl-sync-dot"></span>
                   <span id="lvl-sync-txt">Sign in with Discord to sync your levels between PCs.</span>
@@ -495,6 +495,10 @@
                 <div class="togrow lvl-auto">
                   <div><span>Auto-add levels</span><span class="sub-desc">When you play a level that isn't here yet, add it with its name and ID. New levels start switched off with no % until you set one.</span></div>
                   <button type="button" class="toggle" data-bool-key="level_auto_add" aria-label="Auto-add levels"></button>
+                </div>
+                <div class="togrow lvl-auto">
+                  <div><span>Only mute on my levels</span><span class="sub-desc">Turns off normal % muting. Apps are only muted on levels you've switched on, using that level's %.</span></div>
+                  <button type="button" class="toggle" data-bool-key="level_only_mute" aria-label="Only mute on my levels"></button>
                 </div>
                 <div class="lvl-search">
                   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>
@@ -515,6 +519,7 @@
                 <div class="lvl-detected">
                   <span>Detected level:</span> <strong id="lvl-active">None yet</strong>
                 </div>
+                <div class="lvl-gate" id="lvl-gate" hidden></div>
                 <div class="custom" style="margin-top:10px">
                   <button type="button" class="btn primary sm" id="lvl-test-btn">Test detection</button>
                 </div>
@@ -604,6 +609,10 @@
               <div class="togrow">
                 <div><span>Per-level profiles from Eclipse label <span class="beta-tag">Beta</span></span><span class="sub-desc">Reads the Eclipse {levelName} ({levelID}) label to load each level's settings. Adds a Levels tab to the sidebar.</span></div>
                 <button type="button" class="toggle" data-bool-key="level_label_enabled" aria-label="Read level name from Eclipse label"></button>
+              </div>
+              <div class="togrow" id="set-level-only-row" hidden>
+                <div><span>Only mute on my levels <span class="beta-tag">Beta</span></span><span class="sub-desc">Turns off normal % muting: apps are only muted on levels you've switched on in the Levels tab.</span></div>
+                <button type="button" class="toggle" data-bool-key="level_only_mute" aria-label="Only mute on my levels"></button>
               </div>
               <div class="togrow" id="set-auto-add-row" hidden>
                 <div><span>Auto-add levels <span class="beta-tag">Beta</span></span><span class="sub-desc">Adds levels you play to the Levels tab with their name and ID, switched off with no % until you set one.</span></div>

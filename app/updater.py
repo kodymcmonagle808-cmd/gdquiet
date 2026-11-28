@@ -14,11 +14,12 @@ from functools import cmp_to_key
 from pathlib import Path
 from typing import Callable
 
-APP_VERSION = "4.6.1"
+APP_VERSION = "4.6.2"
 PATCH_NOTES = """\
-- Fixed: switching levels wasn't noticed when you'd drawn a label box. Eclipse's labels move up and down between levels, so GD Quiet now treats your box as a guide and finds the level label above or below it
-- Fixed: long labels like "{levelName} ({levelID})" no longer get cut off at the edge of the box
-- Fixed: text that isn't from Geometry Dash (like the taskbar weather) is no longer read as a level name
+- New: "Only mute on my levels" setting (Levels tab and Settings). Turns off normal % muting so apps are only muted on levels you've switched on, using that level's %
+- The overall % and the level you're playing now stay in sync: changing either one updates the other
+- Typing a % for a level now switches that level on
+- Fixed: Geometry Dash pause-menu text like "SFX" could be added as a level
 """.strip()
 GITHUB_REPO = "kodymcmonagle808-cmd/gdquiet"
 RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"

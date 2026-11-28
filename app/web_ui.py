@@ -676,6 +676,7 @@ class GDQuietWebApp:
                 "last_raw": self._last_level_label_raw,
                 "active_level": self._active_level_name,
                 "scan_status": self._level_scan_status_text(cfg_copy),
+                "mute_gate": self._level_mute_gate_text(cfg_copy),
                 "test": self._level_test,
             },
             "account": self.auth.to_state(),
@@ -719,6 +720,7 @@ class GDQuietWebApp:
         clamped = round(max(0.0, min(100.0, float(pct))), 3)
         with self.cfg_lock:
             self.cfg["mute_at_percent"] = clamped
+            self._sync_active_level_threshold(clamped)
         self._save_cfg()
         return self.get_state()
 
@@ -740,6 +742,8 @@ class GDQuietWebApp:
 
         with self.cfg_lock:
             self.cfg[key] = value
+            if key == "mute_at_percent":
+                self._sync_active_level_threshold(float(value))
         self._save_cfg()
 
         if key == "audio_mode":
@@ -1076,6 +1080,26 @@ class GDQuietWebApp:
         self._save_cfg()
         return self.get_state()
 
+    def _sync_active_level_threshold(self, pct: float) -> None:
+        """Keep the switched-on level you're playing in step with the overall %.
+
+        Must be called with cfg_lock held.
+        """
+        key = self._active_level_key
+        profiles = dict(self.cfg.get("level_profiles") or {})
+        profile = profiles.get(key) if key else None
+        if isinstance(profile, dict) and profile_enabled(profile):
+            profiles[key] = {**profile, "mute_at_percent": round(float(pct), 3)}
+            self.cfg["level_profiles"] = profiles
+
+    def _level_allows_mute(self) -> bool:
+        """With "Only mute on my levels", muting needs a switched-on level being played."""
+        with self.cfg_lock:
+            if not (self.cfg.get("level_only_mute", False) and self.cfg.get("level_label_enabled", False)):
+                return True
+            profile = (self.cfg.get("level_profiles") or {}).get(self._active_level_key)
+        return isinstance(profile, dict) and profile_enabled(profile)
+
     def _apply_enabled_level(self, profile: dict[str, Any]) -> bool:
         """Apply a switched-on level's settings and make sure watching is on.
 
@@ -1142,9 +1166,13 @@ class GDQuietWebApp:
             self._footer_message = f"Added {self._active_level_name} to your levels (switched off)."
         else:
             self._footer_message = f"Level detected: {self._active_level_name}"
-        # A loaded profile can change the selected apps; re-apply if we're mid-mute.
+        # A loaded profile can change the selected apps; re-apply if we're mid-mute,
+        # or unmute right away if "Only mute on my levels" no longer allows it.
         if self.current_want_mute:
-            self._apply_mute_state(True, force_reapply=True)
+            if self._level_allows_mute():
+                self._apply_mute_state(True, force_reapply=True)
+            else:
+                self._apply_mute_state(False)
 
     # ---- Levels page ----
 
@@ -1234,10 +1262,14 @@ class GDQuietWebApp:
             profiles = dict(self.cfg.get("level_profiles") or {})
             profile = profiles.get(key)
             if isinstance(profile, dict):
-                profiles[key] = {**profile, "mute_at_percent": pct}
+                updated = {**profile, "mute_at_percent": pct}
+                if pct is not None:
+                    # Giving a level a % means you want it used, so switch it on.
+                    updated["enabled"] = True
+                profiles[key] = updated
                 self.cfg["level_profiles"] = profiles
-                if pct is not None and key == self._active_level_key and profile_enabled(profile):
-                    self.cfg["mute_at_percent"] = pct
+                if pct is not None and key == self._active_level_key:
+                    self._apply_enabled_level(updated)
         self._save_cfg()
         return self.get_state()
 
@@ -1374,6 +1406,16 @@ class GDQuietWebApp:
             if key and key != self._active_level_key:
                 self._activate_level_profile(level_name, key)
 
+    def _level_mute_gate_text(self, cfg_copy: dict[str, Any]) -> str:
+        if not (cfg_copy.get("level_only_mute", False) and cfg_copy.get("level_label_enabled", False)):
+            return ""
+        profile = (cfg_copy.get("level_profiles") or {}).get(self._active_level_key)
+        if isinstance(profile, dict) and profile_enabled(profile):
+            return f"Muting on for {self._active_level_name}"
+        if self._active_level_name:
+            return f"Not muting: {self._active_level_name} isn't switched on"
+        return "Not muting: no switched-on level detected"
+
     def _level_scan_status_text(self, cfg_copy: dict[str, Any]) -> str:
         if not cfg_copy.get("level_label_enabled", False):
             return "Off"
@@ -1457,13 +1499,14 @@ class GDQuietWebApp:
             audio_mode = str(self.cfg.get("audio_mode", "mute"))
             ducking_volume = float(self.cfg.get("ducking_volume", 20.0))
 
+        level_ok = self._level_allows_mute()
         effective_mute = (
             self._tray_audio_override
             if self._tray_audio_override is not None
-            else bool(not testing and watch_enabled and reading.should_mute)
+            else bool(not testing and watch_enabled and level_ok and reading.should_mute)
         )
         fade_volume = None
-        if self._tray_audio_override is None and not testing and watch_enabled and not effective_mute:
+        if self._tray_audio_override is None and not testing and watch_enabled and level_ok and not effective_mute:
             fade_volume = fade_volume_for_percent(
                 reading.percent,
                 threshold,

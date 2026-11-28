@@ -43,6 +43,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "level_label_enabled": False,
     "level_label_region": None,
     "level_auto_add": False,
+    "level_only_mute": False,
     "level_profiles": {},
     "audio_mode": "mute",
     "ducking_volume": 20.0,

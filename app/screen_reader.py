@@ -56,7 +56,9 @@ _LABEL_STAT_WORDS = frozenset(
 )
 _LABEL_ALWAYS_STAT_WORDS = frozenset({"attempt", "attempts"})
 _LABEL_STATUS_WORDS = frozenset(
-    {"testmode", "noclip", "cheating", "cheat", "safemode", "practice", "practicemode", "startpos", "paused"}
+    {"testmode", "noclip", "cheating", "cheat", "safemode", "practice", "practicemode", "startpos", "paused",
+     # Geometry Dash pause-menu text that can sit near the labels.
+     "sfx", "music", "resume", "restart", "normalmode", "exit", "settings", "options", "menu", "levelcomplete"}
 )
 
 _WINDOW_CACHE_LOCK = threading.Lock()

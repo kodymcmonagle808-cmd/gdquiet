@@ -386,6 +386,11 @@
     // The Levels tab (and its settings) only exist while the beta setting is on.
     $("nav-levels").hidden = !on;
     $("set-auto-add-row").hidden = !on;
+    $("set-level-only-row").hidden = !on;
+    const gate = info.mute_gate || "";
+    $("lvl-gate").hidden = !gate;
+    $("lvl-gate").textContent = gate;
+    $("lvl-gate").classList.toggle("bad", gate.startsWith("Not muting"));
     if (!on && $("view-levels").classList.contains("on")) showPage("overview");
 
     $("lvl-region-desc").textContent = info.region_description || "Default · left 30% of the game window";

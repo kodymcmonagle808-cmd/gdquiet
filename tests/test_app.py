@@ -1420,7 +1420,8 @@ class GDQuietTests(unittest.TestCase):
 
                 # A new ID with a known name becomes its own level, keyed by ID (auto-add on).
                 api.set_setting("level_auto_add", True)
-                api.set_threshold(33)
+                app._on_level_result("not saved (444)", "", None, "ok")
+                api.set_threshold(33)  # not on a saved level: only the overall % changes
                 app._on_level_result("clubstep startpos (333)", "clubstep startpos (333)", None, "ok")
                 st = api.get_state()
                 added = st["cfg"]["level_profiles"]["id:333"]
@@ -1471,8 +1472,8 @@ class GDQuietTests(unittest.TestCase):
 
                 # Detecting a switched-on level by ID turns watching on.
                 api.set_setting("watch_enabled", False)
-                api.set_threshold(10)
                 app._on_level_result("something else (999)", "", None, "ok")
+                api.set_threshold(10)  # not on a saved level: only the overall % changes
                 app._on_level_result("misread name (12345556)", "", None, "ok")
                 st = api.get_state()
                 self.assertTrue(st["cfg"]["watch_enabled"])
@@ -1679,6 +1680,87 @@ class GDQuietTests(unittest.TestCase):
                 )
         finally:
             ocr.close()
+
+    def test_overall_and_level_percent_stay_in_sync(self) -> None:
+        cfg = dict(config.DEFAULT_CONFIG, level_label_enabled=True, mute_at_percent=5.0)
+        with web_app(cfg) as (app, api):
+            api.add_level("Stereo Madness", 20, "1")
+            api.add_level("Back On Track", 40, "2")
+            app._on_level_result("Stereo Madness (1)", "", None, "ok")
+            self.assertEqual(app.cfg["mute_at_percent"], 20.0)
+
+            # Overview slider / OBS overlay / Settings all update the level being played.
+            api.set_threshold(35)
+            self.assertEqual(app.cfg["level_profiles"]["id:1"]["mute_at_percent"], 35.0)
+            api.set_setting("mute_at_percent", 37)
+            self.assertEqual(app.cfg["level_profiles"]["id:1"]["mute_at_percent"], 37.0)
+            app._queue_obs_overlay_control({"action": "threshold", "value": 38})
+            self.assertEqual(app.cfg["level_profiles"]["id:1"]["mute_at_percent"], 38.0)
+            # Other levels are untouched.
+            self.assertEqual(app.cfg["level_profiles"]["id:2"]["mute_at_percent"], 40.0)
+
+            # A switched-off level isn't changed by the overall %.
+            api.set_level_enabled("id:2", False)
+            app._on_level_result("Back On Track (2)", "", None, "ok")
+            api.set_threshold(12)
+            self.assertEqual(app.cfg["level_profiles"]["id:2"]["mute_at_percent"], 40.0)
+
+    def test_setting_a_level_percent_switches_it_on_and_applies_it(self) -> None:
+        cfg = dict(config.DEFAULT_CONFIG, level_label_enabled=True, level_auto_add=True, mute_at_percent=5.0, watch_enabled=False)
+        with web_app(cfg) as (app, api):
+            # Auto-added: switched off, empty %.
+            app._on_level_result("Back On Track (2)", "", None, "ok")
+            row = next(r for r in api.get_state()["levels"] if r["key"] == "id:2")
+            self.assertFalse(row["enabled"])
+            self.assertEqual(app.cfg["mute_at_percent"], 5.0)
+
+            # Typing 10% while playing it: switched on, applied, watching starts.
+            st = api.set_level_threshold("id:2", "10")
+            row = next(r for r in st["levels"] if r["key"] == "id:2")
+            self.assertTrue(row["enabled"])
+            self.assertEqual(st["cfg"]["mute_at_percent"], 10.0)
+            self.assertTrue(st["cfg"]["watch_enabled"])
+
+            # Clearing the % doesn't switch it off.
+            st = api.set_level_threshold("id:2", "")
+            self.assertTrue(next(r for r in st["levels"] if r["key"] == "id:2")["enabled"])
+
+    def test_only_mute_on_my_levels(self) -> None:
+        cfg = dict(config.DEFAULT_CONFIG, level_label_enabled=True, level_only_mute=True, mute_at_percent=50.0)
+        with web_app(cfg) as (app, api):
+            requests: list[bool] = []
+            app._apply_mute_state = lambda muted, **_kw: (requests.append(muted), setattr(app, "current_want_mute", muted))
+            api.add_level("Stereo Madness", 30, "1")
+            api.add_level("Off level", 30, "3")
+            api.set_level_enabled("id:3", False)
+
+            # No level detected yet: normal % muting is off.
+            app._on_screen_reading(reading(80.0, True))
+            self.assertEqual(requests, [])
+            self.assertEqual(api.get_state()["level_label"]["mute_gate"], "Not muting: no switched-on level detected")
+
+            # Switched-on level: mutes past its %.
+            app._on_level_result("Stereo Madness (1)", "", None, "ok")
+            app._on_screen_reading(reading(80.0, True))
+            self.assertEqual(requests, [True])
+            self.assertIn("Muting on for Stereo Madness", api.get_state()["level_label"]["mute_gate"])
+
+            # Switched-off level: unmutes and stays unmuted.
+            app._on_level_result("Off level (3)", "", None, "ok")
+            app._on_screen_reading(reading(80.0, True))
+            self.assertEqual(requests, [True, False])
+            self.assertIn("isn't switched on", api.get_state()["level_label"]["mute_gate"])
+
+            # Setting off: normal % muting again.
+            api.set_setting("level_only_mute", False)
+            app._on_screen_reading(reading(80.0, True))
+            self.assertEqual(requests[-1], True)
+            self.assertEqual(api.get_state()["level_label"]["mute_gate"], "")
+
+    def test_gd_pause_menu_words_are_not_levels(self) -> None:
+        for word in ("SFX", "Music", "Resume", "Practice"):
+            self.assertIsNone(screen_reader.extract_level_name_from_label_text(word), word)
+        self.assertEqual(screen_reader.extract_level_name_from_label_text("Back On Track (2)"), "Back On Track (2)")
 
     def test_web_ui_turns_off_saved_beta_updates_on_start(self) -> None:
         import web_ui

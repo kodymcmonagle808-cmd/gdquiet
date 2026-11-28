@@ -427,3 +427,7 @@ h1 .beta-tag{font-size:10px;letter-spacing:.04em}
 .lvl-sync .dot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--amber)}
 .lvl-sync .dot.ok{background:var(--green)}
 .lvl-sync .dot.bad{background:var(--red)}
+
+/* ---------- Levels: "only mute on my levels" status ---------- */
+.lvl-gate{margin-top:6px;font-size:12px;color:var(--green)}
+.lvl-gate.bad{color:var(--amber)}
