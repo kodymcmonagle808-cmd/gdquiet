@@ -480,14 +480,23 @@
             <div class="panel-group">
               <div class="panel-title">Your levels</div>
               <div class="panel pad">
-                <p class="cap-note">Each level keeps its own threshold, apps and capture region, and GD Quiet loads them when it reads the level. Add the level ID so levels with the same name stay separate: when an ID is shown, levels are matched by ID only. Switch a level off to stop it changing your settings.</p>
+                <p class="cap-note">When GD Quiet reads a level that's switched on, it turns watching on and uses that level's %. Add the level ID so levels with the same name stay separate: when an ID is shown, levels are matched by ID only. Levels that are switched off are recognised but change nothing.</p>
                 <form class="lvl-add" id="lvl-add-form" autocomplete="off">
                   <input class="inp lvl-add-name" id="lvl-add-name" type="text" maxlength="80" placeholder="Level name, e.g. clubstep startpos" aria-label="Level name" />
                   <input class="inp lvl-add-id" id="lvl-add-id" type="text" inputmode="numeric" maxlength="11" placeholder="Level ID" aria-label="Level ID" />
                   <div class="val lvl-add-pct"><input class="inp" id="lvl-add-threshold" type="text" inputmode="decimal" placeholder="50" aria-label="Threshold percent" /><span class="unit">%</span></div>
                   <button type="submit" class="btn primary sm">Add level</button>
                 </form>
+                <div class="togrow lvl-auto">
+                  <div><span>Auto-add levels</span><span class="sub-desc">When you play a level that isn't here yet, add it with its name and ID. New levels start switched off with no % until you set one.</span></div>
+                  <button type="button" class="toggle" data-bool-key="level_auto_add" aria-label="Auto-add levels"></button>
+                </div>
+                <div class="lvl-search">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>
+                  <input class="inp" id="lvl-search" type="search" placeholder="Search levels by name or ID" aria-label="Search levels" autocomplete="off" />
+                </div>
                 <div class="lvl-list" id="lvl-list"></div>
+                <div class="lvl-empty" id="lvl-nomatch" hidden>No levels match your search.</div>
                 <div class="lvl-empty" id="lvl-empty">No levels yet. Add one above, or play a level with the Eclipse label showing and it'll appear here.</div>
               </div>
             </div>
@@ -590,6 +599,10 @@
               <div class="togrow">
                 <div><span>Per-level profiles from Eclipse label <span class="beta-tag">Beta</span></span><span class="sub-desc">Reads the Eclipse {levelName} ({levelID}) label to load each level's settings. Adds a Levels tab to the sidebar.</span></div>
                 <button type="button" class="toggle" data-bool-key="level_label_enabled" aria-label="Read level name from Eclipse label"></button>
+              </div>
+              <div class="togrow" id="set-auto-add-row" hidden>
+                <div><span>Auto-add levels <span class="beta-tag">Beta</span></span><span class="sub-desc">Adds levels you play to the Levels tab with their name and ID, switched off with no % until you set one.</span></div>
+                <button type="button" class="toggle" data-bool-key="level_auto_add" aria-label="Auto-add levels"></button>
               </div>
             </div>
           </div>

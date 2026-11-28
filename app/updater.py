@@ -14,13 +14,13 @@ from functools import cmp_to_key
 from pathlib import Path
 from typing import Callable
 
-APP_VERSION = "4.5.1"
+APP_VERSION = "4.5.2"
 PATCH_NOTES = """\
-- New: level IDs. Use {levelName} ({levelID}) as your Eclipse label so levels with the same name stay separate. When an ID is shown, levels are matched by ID only and the name is ignored. Add the ID when adding a level on the Levels tab
-- Fixed: level names weren't read while muting/% watching was paused. Levels now load whenever the Levels beta is on
-- New: "Test detection" button on the Levels tab shows what the label box sees, what it read, and which of your levels it matches
-- New: the Levels tab shows live scan status (scanning, waiting for Geometry Dash, or game covered)
-- Fixed: if another window covered Geometry Dash, its text could be read as a level name. Scans now pause while the game is covered
+- New: when GD Quiet reads a level you've switched on (matched by level ID), it turns watching on and uses that level's %
+- New: "Auto-add levels" setting (Levels tab and Settings). Levels you play get added with their name and ID, switched off and with an empty % until you set one
+- New: search bar on the Levels tab (search by name or ID)
+- A level's % can be left empty; it then keeps your current %
+- Unknown levels are no longer saved automatically unless Auto-add levels is on
 """.strip()
 GITHUB_REPO = "kodymcmonagle808-cmd/gdquiet"
 RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"

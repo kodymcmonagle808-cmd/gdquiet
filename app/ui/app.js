@@ -340,8 +340,9 @@
     const info = state.level_label || {};
     const on = Boolean(cfg.level_label_enabled);
 
-    // The Levels tab only exists while the beta setting is on.
+    // The Levels tab (and its settings) only exist while the beta setting is on.
     $("nav-levels").hidden = !on;
+    $("set-auto-add-row").hidden = !on;
     if (!on && $("view-levels").classList.contains("on")) showPage("overview");
 
     $("lvl-region-desc").textContent = info.region_description || "Default · left 30% of the game window";
@@ -395,11 +396,18 @@
     $("lvl-test-raw").textContent = "Raw OCR: " + (test.raw || "(no text)");
   }
 
-  function renderLevels(levels) {
+  function renderLevels(allLevels) {
     const list = $("lvl-list");
-    $("lvl-empty").hidden = levels.length > 0;
+    const query = ($("lvl-search").value || "").trim().toLowerCase();
+    const levels = query
+      ? allLevels.filter(
+          (l) => l.name.toLowerCase().includes(query) || String(l.level_id || "").includes(query)
+        )
+      : allLevels;
+    $("lvl-empty").hidden = allLevels.length > 0;
+    $("lvl-nomatch").hidden = !(allLevels.length > 0 && levels.length === 0);
     // Only rebuild when something changed, and never while the user is typing in a row.
-    const sig = JSON.stringify(levels) + "|" + armedDeleteKey;
+    const sig = JSON.stringify(levels) + "|" + armedDeleteKey + "|" + query;
     if (sig === levelsSignature || list.contains(document.activeElement)) return;
     levelsSignature = sig;
     list.innerHTML = levels
@@ -413,7 +421,7 @@
             <b title="${escapeHtml(l.name)}">${escapeHtml(l.name)}</b>
             <span>${l.active ? '<em>Playing now</em> · ' : ""}${idTxt}${apps}</span>
           </div>
-          <div class="val lvl-pct"><input class="inp" data-level-threshold value="${Number(l.threshold)}" aria-label="Threshold for ${escapeHtml(l.name)}" /><span class="unit">%</span></div>
+          <div class="val lvl-pct"><input class="inp" data-level-threshold value="${l.threshold === null || l.threshold === undefined ? "" : Number(l.threshold)}" placeholder="—" aria-label="Threshold for ${escapeHtml(l.name)}" /><span class="unit">%</span></div>
           <button type="button" class="toggle${l.enabled ? " on" : ""}" data-level-toggle aria-label="Use settings for ${escapeHtml(l.name)}"></button>
           <button type="button" class="lvl-del${armed ? " armed" : ""}" data-level-delete>${armed ? "Confirm" : "Remove"}</button>
         </div>`;
@@ -951,6 +959,9 @@
       $("lvl-add-id").value = "";
       $("lvl-add-threshold").value = "";
       flashSaved();
+    });
+    $("lvl-search").addEventListener("input", () => {
+      if (latestState) renderLevels(latestState.levels || []);
     });
     const levelList = $("lvl-list");
     levelList.addEventListener("click", async (e) => {

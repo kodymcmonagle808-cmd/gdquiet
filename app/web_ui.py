@@ -29,8 +29,10 @@ from profiles import (
     clean_level_id,
     find_matching_profile,
     level_key,
+    new_auto_added_profile,
     profile_enabled,
     profile_key,
+    profile_threshold,
 )
 from screen_reader import (
     ScreenPercentWatcher,
@@ -1062,24 +1064,52 @@ class GDQuietWebApp:
         self._save_cfg()
         return self.get_state()
 
+    def _apply_enabled_level(self, profile: dict[str, Any]) -> bool:
+        """Apply a switched-on level's settings and make sure watching is on.
+
+        Must be called with cfg_lock held. Returns True if watching was turned on.
+        """
+        self.cfg.update(apply_level_profile(self.cfg, profile))
+        if self.cfg.get("watch_enabled", True):
+            return False
+        self.cfg["watch_enabled"] = True
+        self._tray_audio_override = None
+        return True
+
     def _activate_level_profile(self, level_label: str, key: str) -> None:
-        """Load (or create) the profile for a detected label. `level_label` may be
-        "name" or "name (levelID)"."""
+        """Handle a newly detected level. `level_label` may be "name" or "name (levelID)".
+
+        - Saved and switched on: apply its threshold/settings and turn watching on.
+        - Saved and switched off: recognised only; nothing changes.
+        - Not saved: added (switched off, empty %) when "Auto-add levels" is on,
+          otherwise just shown as the detected level.
+        """
+        watch_turned_on = False
+        added = False
         with self.cfg_lock:
             profiles = dict(self.cfg.get("level_profiles") or {})
             profile = profiles.get(key)
             if isinstance(profile, dict):
-                # A level switched off on the Levels page is recognised but its settings aren't applied.
                 if profile_enabled(profile):
-                    self.cfg.update(apply_level_profile(self.cfg, profile))
-            else:
+                    watch_turned_on = self._apply_enabled_level(profile)
+            elif self.cfg.get("level_auto_add", False):
                 name, level_id = split_level_id(level_label)
-                profile = build_level_profile(name or f"Level {level_id}", self.cfg, level_id=level_id)
+                profile = new_auto_added_profile(name or f"Level {level_id}", level_id)
                 profiles[key] = profile
                 self.cfg["level_profiles"] = profiles
-        self._active_level_name = format_level_label(str(profile.get("name") or ""), profile.get("level_id"))
+                added = True
+        if isinstance(profile, dict):
+            self._active_level_name = format_level_label(str(profile.get("name") or ""), profile.get("level_id"))
+        else:
+            self._active_level_name = format_level_label(*split_level_id(level_label))
         self._active_level_key = key
         self._save_cfg()
+        if watch_turned_on:
+            self._footer_message = f"Watching turned on for {self._active_level_name}."
+        elif added:
+            self._footer_message = f"Added {self._active_level_name} to your levels (switched off)."
+        else:
+            self._footer_message = f"Level detected: {self._active_level_name}"
         # A loaded profile can change the selected apps; re-apply if we're mid-mute.
         if self.current_want_mute:
             self._apply_mute_state(True, force_reapply=True)
@@ -1097,7 +1127,7 @@ class GDQuietWebApp:
                     "key": key,
                     "name": str(profile.get("name") or key),
                     "level_id": str(profile.get("level_id") or ""),
-                    "threshold": float(profile.get("mute_at_percent", 50.0)),
+                    "threshold": profile_threshold(profile),
                     "enabled": profile_enabled(profile),
                     "app_count": len(profile.get("selected_apps") or []),
                     "active": key == self._active_level_key,
@@ -1149,24 +1179,28 @@ class GDQuietWebApp:
             if isinstance(profile, dict):
                 profiles[key] = {**profile, "enabled": bool(enabled)}
                 self.cfg["level_profiles"] = profiles
-                # Turning on the level you're playing applies its settings right away.
+                # Turning on the level you're playing applies it (and starts watching) right away.
                 if enabled and key == self._active_level_key:
-                    self.cfg.update(apply_level_profile(self.cfg, profiles[key]))
+                    self._apply_enabled_level(profiles[key])
         self._save_cfg()
         return self.get_state()
 
     def set_level_threshold(self, key: str, threshold: Any) -> dict[str, Any]:
-        try:
-            pct = round(max(0.0, min(100.0, float(threshold))), 3)
-        except (TypeError, ValueError):
-            return self.get_state()
+        """Set a level's %, or clear it with an empty value (the level then keeps the current %)."""
+        if threshold is None or str(threshold).strip() == "":
+            pct: float | None = None
+        else:
+            try:
+                pct = round(max(0.0, min(100.0, float(threshold))), 3)
+            except (TypeError, ValueError):
+                return self.get_state()
         with self.cfg_lock:
             profiles = dict(self.cfg.get("level_profiles") or {})
             profile = profiles.get(key)
             if isinstance(profile, dict):
                 profiles[key] = {**profile, "mute_at_percent": pct}
                 self.cfg["level_profiles"] = profiles
-                if key == self._active_level_key and profile_enabled(profile):
+                if pct is not None and key == self._active_level_key and profile_enabled(profile):
                     self.cfg["mute_at_percent"] = pct
         self._save_cfg()
         return self.get_state()
@@ -1251,7 +1285,6 @@ class GDQuietWebApp:
             key = find_matching_profile(profiles, level_name) or level_key(*split_level_id(level_name))
             if key and key != self._active_level_key:
                 self._activate_level_profile(level_name, key)
-                self._footer_message = f"Level detected: {self._active_level_name}"
 
     def _level_scan_status_text(self, cfg_copy: dict[str, Any]) -> str:
         if not cfg_copy.get("level_label_enabled", False):

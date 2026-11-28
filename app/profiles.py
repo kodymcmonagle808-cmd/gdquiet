@@ -90,9 +90,41 @@ def profile_enabled(profile: dict[str, Any]) -> bool:
     return bool(profile.get("enabled", True))
 
 
+def new_auto_added_profile(level_name: str, level_id: object = None) -> dict[str, Any]:
+    """A level added automatically the first time it's seen.
+
+    It starts switched off with no threshold, and stores no apps or capture
+    settings, so it changes nothing until the user sets it up.
+    """
+    return {
+        "name": level_name.strip(),
+        "level_id": clean_level_id(level_id),
+        "enabled": False,
+        "mute_at_percent": None,
+        "auto_added": True,
+    }
+
+
+def profile_threshold(profile: dict[str, Any]) -> float | None:
+    value = profile.get("mute_at_percent")
+    try:
+        return None if value is None or value == "" else float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def apply_level_profile(config: dict[str, Any], profile: dict[str, Any]) -> dict[str, Any]:
+    """Copy a level's saved settings into the config. Settings the level doesn't
+    have (or an empty threshold) leave the current values alone."""
     updated = deepcopy(config)
     for key in PROFILE_FIELDS:
-        if key in profile:
+        if key not in profile or profile[key] is None:
+            continue
+        if key == "mute_at_percent":
+            threshold = profile_threshold(profile)
+            if threshold is None:
+                continue
+            updated[key] = threshold
+        else:
             updated[key] = deepcopy(profile[key])
     return updated

@@ -1466,15 +1466,15 @@ class GDQuietTests(unittest.TestCase):
                 self.assertEqual(app._active_level_key, "")
 
                 api.set_setting("level_label_enabled", True)
-                api.set_threshold(40)
+                # Auto-add is off: an unknown level is shown but not saved.
                 app._on_screen_reading(reading("Stereo Madness", "FPS 240\nStereo Madness"))
                 st = api.get_state()
                 self.assertEqual(st["level_label"]["active_level"], "Stereo Madness")
                 self.assertIn("Stereo Madness", st["level_label"]["last_raw"])
-                self.assertEqual(st["cfg"]["level_profiles"]["stereomadness"]["mute_at_percent"], 40.0)
+                self.assertEqual(st["cfg"]["level_profiles"], {})
 
-                # A new level gets its own profile; returning loads the saved one.
-                api.set_threshold(80)
+                api.add_level("Stereo Madness", 40)
+                api.add_level("Deadlocked", 80)
                 app._on_screen_reading(reading("Deadlocked"))
                 api.save_setup()
                 app._on_screen_reading(reading("Stereo Madness"))
@@ -1627,7 +1627,9 @@ class GDQuietTests(unittest.TestCase):
                 st = api.get_state()
                 self.assertEqual(st["level_label"]["active_level"], "clubstep startpos")
                 self.assertEqual(st["cfg"]["mute_at_percent"], 70.0)
-                self.assertIn("muting is paused", st["level_label"]["scan_status"])
+                # The level is switched on, so detecting it turned watching back on.
+                self.assertTrue(st["cfg"]["watch_enabled"])
+                self.assertNotIn("muting is paused", st["level_label"]["scan_status"])
 
                 img =PILImage.new("RGB", (271, 61), (20, 120, 40))
                 with patch.object(
@@ -1728,12 +1730,16 @@ class GDQuietTests(unittest.TestCase):
                 app._on_level_result("clubstep startpos (111)", "clubstep startpos (111)", None, "ok")
                 self.assertEqual(api.get_state()["cfg"]["mute_at_percent"], 60.0)
 
-                # A new ID with a known name becomes its own level, keyed by ID.
+                # A new ID with a known name becomes its own level, keyed by ID (auto-add on).
+                api.set_setting("level_auto_add", True)
                 api.set_threshold(33)
                 app._on_level_result("clubstep startpos (333)", "clubstep startpos (333)", None, "ok")
                 st = api.get_state()
-                self.assertEqual(st["cfg"]["level_profiles"]["id:333"]["level_id"], "333")
-                self.assertEqual(st["cfg"]["level_profiles"]["id:333"]["name"], "clubstep startpos")
+                added = st["cfg"]["level_profiles"]["id:333"]
+                self.assertEqual((added["name"], added["level_id"]), ("clubstep startpos", "333"))
+                self.assertFalse(added["enabled"])
+                self.assertIsNone(added["mute_at_percent"])
+                self.assertEqual(st["cfg"]["mute_at_percent"], 33.0)
                 self.assertEqual(st["cfg"]["level_profiles"]["id:111"]["mute_at_percent"], 60.0)
 
                 # Saving keeps the clean name and the ID.
@@ -1742,6 +1748,79 @@ class GDQuietTests(unittest.TestCase):
                 self.assertEqual((saved["name"], saved["level_id"], saved["mute_at_percent"]), ("clubstep startpos", "333", 33.0))
             finally:
                 app._cleanup_sync()
+
+    def test_web_ui_enabled_level_turns_watching_on_and_auto_add(self) -> None:
+        import web_ui
+
+        cfg = dict(config.DEFAULT_CONFIG)
+        cfg["level_label_enabled"] = True
+        cfg["watch_enabled"] = False
+        cfg["mute_at_percent"] = 50.0
+        with (
+            patch.object(web_ui, "load_config", return_value=cfg),
+            patch.object(web_ui, "save_config"),
+            patch.object(web_ui, "list_mute_targets", return_value=[]),
+            patch.object(web_ui, "list_open_window_processes", return_value=["geometrydash.exe"]),
+            patch.object(web_ui, "ScreenPercentWatcher"),
+            patch.object(web_ui.DiscordAuth, "load"),
+        ):
+            app = web_ui.GDQuietWebApp()
+            try:
+                api = web_ui.WebApi(app)
+                api.add_level("clubstep startpos", 72, "12345556")
+                api.set_level_enabled("id:12345556", False)
+
+                # Matched but switched off: watching stays paused, % unchanged.
+                app._on_level_result("clubstep startpos (12345556)", "", None, "ok")
+                st = api.get_state()
+                self.assertFalse(st["cfg"]["watch_enabled"])
+                self.assertEqual(st["cfg"]["mute_at_percent"], 50.0)
+
+                # Switching on the level you're playing starts watching with its %.
+                st = api.set_level_enabled("id:12345556", True)
+                self.assertTrue(st["cfg"]["watch_enabled"])
+                self.assertEqual(st["cfg"]["mute_at_percent"], 72.0)
+
+                # Detecting a switched-on level by ID turns watching on.
+                api.set_setting("watch_enabled", False)
+                api.set_threshold(10)
+                app._on_level_result("something else (999)", "", None, "ok")
+                app._on_level_result("misread name (12345556)", "", None, "ok")
+                st = api.get_state()
+                self.assertTrue(st["cfg"]["watch_enabled"])
+                self.assertEqual(st["cfg"]["mute_at_percent"], 72.0)
+                self.assertIn("Watching turned on", st["footer_message"])
+                # Auto-add was off, so the unknown level wasn't saved.
+                self.assertNotIn("id:999", st["cfg"]["level_profiles"])
+
+                # Auto-add: new levels start switched off with an empty %.
+                api.set_setting("level_auto_add", True)
+                app._on_level_result("Bloodbath (10565740)", "", None, "ok")
+                st = api.get_state()
+                row = next(r for r in st["levels"] if r["key"] == "id:10565740")
+                self.assertEqual((row["name"], row["level_id"]), ("Bloodbath", "10565740"))
+                self.assertFalse(row["enabled"])
+                self.assertIsNone(row["threshold"])
+                self.assertEqual(row["app_count"], 0)
+                self.assertEqual(st["cfg"]["mute_at_percent"], 72.0)
+
+                # Switched on with no % set: watching starts but the current % is kept.
+                api.set_setting("watch_enabled", False)
+                st = api.set_level_enabled("id:10565740", True)
+                self.assertTrue(st["cfg"]["watch_enabled"])
+                self.assertEqual(st["cfg"]["mute_at_percent"], 72.0)
+                st = api.set_level_threshold("id:10565740", "65")
+                self.assertEqual(st["cfg"]["mute_at_percent"], 65.0)
+                st = api.set_level_threshold("id:10565740", "")
+                self.assertIsNone(next(r for r in st["levels"] if r["key"] == "id:10565740")["threshold"])
+            finally:
+                app._cleanup_sync()
+
+    def test_apply_level_profile_skips_empty_threshold(self) -> None:
+        cfg = {"mute_at_percent": 55.0, "selected_apps": ["spotify.exe"]}
+        auto = profiles.new_auto_added_profile("Bloodbath", "10565740")
+        self.assertEqual(profiles.apply_level_profile(cfg, auto), cfg)
+        self.assertEqual(profiles.apply_level_profile(cfg, {"mute_at_percent": "70"})["mute_at_percent"], 70.0)
 
     def test_web_ui_turns_off_saved_beta_updates_on_start(self) -> None:
         import web_ui
