@@ -1,11 +1,13 @@
-pycaw
-psutil
-mss
-pillow
-pystray
-pywebview
-winrt-Windows.Media.Ocr
-winrt-Windows.Graphics.Imaging
-winrt-Windows.Storage.Streams
-winrt-Windows.Globalization
-pyinstaller
+# Pinned so a new third-party release can't silently break a build.
+# Bump deliberately, run the tests, then release.
+pycaw==20260927
+psutil==7.2.2
+mss==10.2.0
+pillow==13.0.0
+pystray==0.19.5
+pywebview==6.2.1
+winrt-Windows.Media.Ocr==4!10.0.28000.2957
+winrt-Windows.Graphics.Imaging==4!10.0.28000.2957
+winrt-Windows.Storage.Streams==4!10.0.28000.2957
+winrt-Windows.Globalization==4!10.0.28000.2957
+pyinstaller==6.22.3

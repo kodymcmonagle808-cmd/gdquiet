@@ -407,3 +407,23 @@ h1 .beta-tag{font-size:10px;letter-spacing:.04em}
 .lvl-search svg{position:absolute;left:8px;top:50%;width:13px;height:13px;transform:translateY(-50%);color:var(--faint);pointer-events:none}
 .lvl-search .inp{text-align:left;padding-left:27px;height:29px}
 .lvl-pct .inp::placeholder{color:var(--faint)}
+
+/* ---------- Levels: per-level app picker ---------- */
+.lvl-apps-btn{font-size:11px;color:var(--accent-ink);padding:0;text-decoration:underline;text-decoration-color:rgba(130,209,224,.35);text-underline-offset:2px}
+.lvl-apps-btn:hover{color:var(--ink)}
+.lvl-apps{margin:0 0 8px;padding:10px 11px;background:var(--sunken);border:1px solid var(--line);border-radius:2px}
+.lvl-apps-head{font-size:12px;color:var(--muted);margin-bottom:8px}
+.lvl-apps-head b{color:var(--ink)}
+.lvl-apps-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:4px 12px;max-height:180px;overflow-y:auto;margin-bottom:10px}
+.lvl-app{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink);min-width:0;cursor:pointer}
+.lvl-app span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lvl-app input{accent-color:var(--accent);margin:0;flex:none}
+.lvl-apps-empty{font-size:12px;color:var(--faint)}
+.lvl-apps-actions{display:flex;gap:6px;flex-wrap:wrap}
+
+/* ---------- Levels: cloud sync status ---------- */
+.lvl-sync{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);padding:7px 10px;margin-bottom:10px;background:var(--sunken);border:1px solid var(--line);border-radius:2px}
+.lvl-sync span:not(.dot){flex:1;min-width:0}
+.lvl-sync .dot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--amber)}
+.lvl-sync .dot.ok{background:var(--green)}
+.lvl-sync .dot.bad{background:var(--red)}

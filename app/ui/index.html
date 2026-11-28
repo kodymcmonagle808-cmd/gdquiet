@@ -481,6 +481,11 @@
               <div class="panel-title">Your levels</div>
               <div class="panel pad">
                 <p class="cap-note">When GD Quiet reads a level that's switched on, it turns watching on and uses that level's %. Add the level ID so levels with the same name stay separate: when an ID is shown, levels are matched by ID only. Levels that are switched off are recognised but change nothing.</p>
+                <div class="lvl-sync" id="lvl-sync">
+                  <span class="dot" id="lvl-sync-dot"></span>
+                  <span id="lvl-sync-txt">Sign in with Discord to sync your levels between PCs.</span>
+                  <button type="button" class="btn ghost sm" id="lvl-sync-btn" hidden>Sync now</button>
+                </div>
                 <form class="lvl-add" id="lvl-add-form" autocomplete="off">
                   <input class="inp lvl-add-name" id="lvl-add-name" type="text" maxlength="80" placeholder="Level name, e.g. clubstep startpos" aria-label="Level name" />
                   <input class="inp lvl-add-id" id="lvl-add-id" type="text" inputmode="numeric" maxlength="11" placeholder="Level ID" aria-label="Level ID" />

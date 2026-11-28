@@ -4,6 +4,7 @@ import ctypes
 import sys
 import unittest
 from pathlib import Path
+from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -12,6 +13,7 @@ from PIL import Image, ImageDraw, ImageFont
 APP_DIR = Path(__file__).resolve().parent.parent / "app"
 sys.path.insert(0, str(APP_DIR))
 
+import common  # noqa: E402
 import config  # noqa: E402
 import discord_hotkey  # noqa: E402
 import profiles  # noqa: E402
@@ -52,28 +54,61 @@ class FakeSession:
         self.InstanceIdentifier = instance_id
 
 
+@contextmanager
+def web_app(cfg: dict | None = None, **extra_patches):
+    """A GDQuietWebApp with config, audio enumeration, the screen watcher and the
+    tray icon stubbed out. Yields (app, api)."""
+    import web_ui
+
+    with (
+        patch.object(web_ui, "load_config", return_value=dict(cfg or config.DEFAULT_CONFIG)),
+        patch.object(web_ui, "save_config"),
+        patch.object(web_ui, "list_mute_targets", return_value=[]),
+        patch.object(web_ui, "list_open_window_processes", return_value=["geometrydash.exe"]),
+        patch.object(web_ui, "ScreenPercentWatcher"),
+        patch.object(web_ui.DiscordAuth, "load"),
+    ):
+        app = web_ui.GDQuietWebApp()
+        try:
+            yield app, web_ui.WebApi(app)
+        finally:
+            app._cleanup_sync()
+
+
+def reading(percent, should_mute, **kw) -> "screen_reader.ScreenReading":
+    return screen_reader.ScreenReading(
+        percent=percent,
+        raw_text="" if percent is None else f"{percent}%",
+        should_mute=should_mute,
+        is_playing=percent is not None,
+        status_text="Watching",
+        preview_image=None,
+        **kw,
+    )
+
+
+def wait_until(predicate, timeout: float = 2.0) -> bool:
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return predicate()
+
+
 class GDQuietTests(unittest.TestCase):
     def setUp(self) -> None:
-        import gdquiet
+        import web_ui
 
-        tray_start_patch = patch.object(gdquiet.GDQuietApp, "_start_tray_icon")
+        tray_start_patch = patch.object(web_ui.GDQuietWebApp, "_start_tray_icon")
         tray_start_patch.start()
         self.addCleanup(tray_start_patch.stop)
 
     def test_input_struct_size_matches_win32_abi(self) -> None:
         expected = 40 if ctypes.sizeof(ctypes.c_void_p) == 8 else 28
         self.assertEqual(ctypes.sizeof(discord_hotkey.INPUT), expected)
-
-    def test_parse_tk_hotkey(self) -> None:
-        mod_only = SimpleNamespace(keysym="Control_L", state=0x0004, keycode=17)
-        self.assertIsNone(discord_hotkey.parse_tk_hotkey(mod_only))
-
-        combo = SimpleNamespace(keysym="d", state=0x0005, keycode=68)
-        parsed = discord_hotkey.parse_tk_hotkey(combo)
-        self.assertEqual(
-            parsed,
-            {"modifiers": ["ctrl", "shift"], "vk": ord("D"), "label": "Ctrl + Shift + D"},
-        )
 
     def test_audio_mute_preserves_manual_mutes(self) -> None:
         chrome = FakeSession("chrome.exe", 101, muted=0)
@@ -153,9 +188,7 @@ class GDQuietTests(unittest.TestCase):
             self.assertEqual(spotify.SimpleAudioVolume.muted, 0)
 
     def test_fade_in_volume_respects_speed_threshold_and_action_volume(self) -> None:
-        import gdquiet
-
-        fade = gdquiet.fade_volume_for_percent
+        fade = common.fade_volume_for_percent
         self.assertIsNone(fade(30.0, 50.0, "slow"))
         self.assertIsNone(fade(35.0, 50.0, "slow"))
         self.assertEqual(fade(42.5, 50.0, "slow"), 50.0)
@@ -166,56 +199,13 @@ class GDQuietTests(unittest.TestCase):
         self.assertIsNone(fade(None, 50.0, "slow"))
 
     def test_screen_reading_fades_before_threshold_then_applies_mute(self) -> None:
-        import threading
-        import gdquiet
-
-        app = gdquiet.GDQuietApp.__new__(gdquiet.GDQuietApp)
-        app._closing = False
-        app.cfg_lock = threading.RLock()
-        app.cfg = {
-            "watch_enabled": True,
-            "remute_interval_s": 0.4,
-            "sound_feedback": False,
-            "fade_in_mode": "slow",
-            "mute_at_percent": 50.0,
-            "audio_mode": "mute",
-            "ducking_volume": 20.0,
-        }
-        app._tray_audio_override = None
-        app.test_lock = threading.Lock()
-        app.test_session = SimpleNamespace(active=False)
-        app.current_want_mute = False
-        app._current_fade_volume = None
-        app._last_audio_enforce_at = 0.0
-        app.apply_requests: list[tuple[bool, float | None]] = []
-        app._apply_mute_state = lambda muted, **kwargs: app.apply_requests.append(
-            (muted, kwargs.get("fade_volume"))
-        )
-        app.reading_lock = threading.Lock()
-        app._ui_reading_pending = False
-        app.root = SimpleNamespace(after=lambda *_args: None)
-
-        app._on_screen_reading(
-            screen_reader.ScreenReading(
-                percent=42.5,
-                raw_text="42.5%",
-                should_mute=False,
-                is_playing=True,
-                status_text="Watching",
-                preview_image=None,
-            )
-        )
-        app._on_screen_reading(
-            screen_reader.ScreenReading(
-                percent=50.0,
-                raw_text="50%",
-                should_mute=True,
-                is_playing=True,
-                status_text="Watching",
-                preview_image=None,
-            )
-        )
-        self.assertEqual(app.apply_requests, [(False, 50.0), (True, None)])
+        cfg = dict(config.DEFAULT_CONFIG, fade_in_mode="slow", mute_at_percent=50.0, audio_mode="mute")
+        with web_app(cfg) as (app, _api):
+            requests: list[tuple[bool, float | None]] = []
+            app._apply_mute_state = lambda muted, **kw: requests.append((muted, kw.get("fade_volume")))
+            app._on_screen_reading(reading(42.5, False))
+            app._on_screen_reading(reading(50.0, True))
+            self.assertEqual(requests, [(False, 50.0), (True, None)])
 
     def test_audio_mode_switch_restores_volume_before_muting(self) -> None:
         spotify = FakeSession("spotify.exe", 111, volume=0.7)
@@ -276,39 +266,7 @@ class GDQuietTests(unittest.TestCase):
         profile["custom_region"]["left"] = 99
         self.assertEqual(updated["custom_region"]["left"], 2)
 
-    def test_confirmed_level_profile_saves_and_reapplies_settings(self) -> None:
-        import threading
-        import gdquiet
-
-        class FakeLabel:
-            def __init__(self) -> None:
-                self.options: dict[str, object] = {}
-
-            def configure(self, **kwargs: object) -> None:
-                self.options.update(kwargs)
-
-        app = gdquiet.GDQuietApp.__new__(gdquiet.GDQuietApp)
-        app.cfg_lock = threading.RLock()
-        app.cfg = dict(config.DEFAULT_CONFIG)
-        app.cfg["level_profiles"] = {}
-        app._active_level_name = ""
-        app._active_level_key = ""
-        app.current_want_mute = False
-        app.active_level_profile_lbl = FakeLabel()
-        app._save_cfg = lambda: None
-        app._sync_level_profile_widgets = lambda: None
-
-        app._activate_level_profile("Stereo Madness", "stereomadness")
-        self.assertIn("stereomadness", app.cfg["level_profiles"])
-        app.cfg["mute_at_percent"] = 72.0
-        app._save_active_level_profile()
-        app.cfg["mute_at_percent"] = 40.0
-        app._activate_level_profile("Stereo Madness", "stereomadness")
-        self.assertEqual(app.cfg["mute_at_percent"], 72.0)
-
     def test_ocr_diagnostics_flag_missed_reads_and_show_raw_text(self) -> None:
-        import gdquiet
-
         valid = screen_reader.ScreenReading(
             percent=47.5,
             raw_text=" 47.5% ",
@@ -318,10 +276,10 @@ class GDQuietTests(unittest.TestCase):
             preview_image=None,
             scan_ms=12.4,
         )
-        text, color = gdquiet.format_ocr_diagnostics(valid)
+        text, color = common.format_ocr_diagnostics(valid)
         self.assertIn("12 ms", text)
         self.assertIn("47.5%", text)
-        self.assertEqual(color, gdquiet.COLORS["green"])
+        self.assertEqual(color, common.COLORS["green"])
 
         missed = screen_reader.ScreenReading(
             percent=None,
@@ -333,10 +291,10 @@ class GDQuietTests(unittest.TestCase):
             scan_ms=8.1,
             consecutive_missed_reads=9,
         )
-        text, color = gdquiet.format_ocr_diagnostics(missed)
+        text, color = common.format_ocr_diagnostics(missed)
         self.assertIn("9 consecutive scans", text)
         self.assertIn("garbled text", text)
-        self.assertEqual(color, gdquiet.COLORS["red"])
+        self.assertEqual(color, common.COLORS["red"])
 
         missed_menu = screen_reader.ScreenReading(
             percent=None,
@@ -347,29 +305,9 @@ class GDQuietTests(unittest.TestCase):
             preview_image=None,
             consecutive_missed_reads=10,
         )
-        text, color = gdquiet.format_ocr_diagnostics(missed_menu)
+        text, color = common.format_ocr_diagnostics(missed_menu)
         self.assertIn("10 consecutive scans", text)
-        self.assertEqual(color, gdquiet.COLORS["amber"])
-
-    def test_tray_action_can_force_unmute_and_then_mute(self) -> None:
-        import threading
-        import gdquiet
-
-        app = gdquiet.GDQuietApp.__new__(gdquiet.GDQuietApp)
-        app.current_want_mute = True
-        app._tray_audio_override = None
-        app.audio_ctrl = SimpleNamespace(has_active_effect=True)
-        app._apply_cond = threading.Condition()
-        app._pending_mute = None
-        app._force_reapply = False
-        app._update_status_indicators = lambda: None
-
-        app._toggle_tray_mute()
-        self.assertFalse(app._tray_audio_override)
-        self.assertFalse(app.current_want_mute)
-        app._toggle_tray_mute()
-        self.assertTrue(app._tray_audio_override)
-        self.assertTrue(app.current_want_mute)
+        self.assertEqual(color, common.COLORS["amber"])
 
     def test_default_config_excludes_supabase_keys(self) -> None:
         self.assertNotIn("supabase_url", config.DEFAULT_CONFIG)
@@ -632,84 +570,6 @@ class GDQuietTests(unittest.TestCase):
         self.assertIn("48.20%", headline)
         self.assertGreaterEqual(len(sess.milestones), 3)
 
-    def test_gui_stop_screen_test_early_does_not_deadlock(self) -> None:
-        import tkinter as tk
-        import gdquiet
-
-        root = tk.Tk()
-        root.withdraw()
-        try:
-            with (
-                patch.object(gdquiet, "load_config", return_value=dict(config.DEFAULT_CONFIG)),
-                patch.object(gdquiet, "save_config"),
-                patch.object(gdquiet, "list_mute_targets", return_value=[]),
-                patch.object(gdquiet, "list_open_window_processes", return_value=[]),
-                patch.object(gdquiet, "ScreenPercentWatcher") as mock_watcher,
-            ):
-                app = gdquiet.GDQuietApp(root)
-                mock_watcher.return_value.start.assert_called_once()
-
-                with app.cfg_lock:
-                    app.cfg["audio_mode"] = "duck"
-                app._update_sidebar_badges()
-                self.assertEqual(app.sidebar_thresh_lbl.cget("text"), "Ducks at 50%")
-                self.assertEqual(app._nav_buttons["apps"][2].cget("text"), "Apps to Duck (0)")
-                self.assertEqual(app.apps_page_heading_lbl.cget("text"), "Apps to Duck")
-                self.assertEqual(app.reset_mute_btn.cget("text"), "Restore Audio & Undeafen")
-                with app.cfg_lock:
-                    app.cfg["audio_mode"] = "mute"
-                app._update_sidebar_badges()
-
-                # Start 30s test, simulate readings, then stop early (previously deadlocked!)
-                app._toggle_screen_test()
-                self.assertTrue(app.test_session.active)
-                app._on_screen_reading(
-                    screen_reader.ScreenReading(
-                        percent=24.5,
-                        raw_text="24.5%",
-                        should_mute=False,
-                        is_playing=True,
-                        status_text="Watching",
-                        preview_image=None,
-                    )
-                )
-                app._toggle_screen_test()
-                self.assertFalse(app.test_session.active)
-                self.assertTrue(app.test_session.completed)
-                self.assertEqual(app.test_btn.cget("text"), "Start 30s Test")
-
-                # Also verify natural expiration path in _test_ui_tick does not deadlock
-                app._toggle_screen_test()
-                app.test_session.start_time -= 31.0
-                app._test_ui_tick()
-                self.assertFalse(app.test_session.active)
-                self.assertTrue(app.test_session.completed)
-
-                # Exercise page tabs & watcher toggle
-                self.assertEqual(app._nav_buttons["discord"][2].cget("text"), "Discord Auto-Deafen")
-                self.assertFalse(hasattr(app, "supabase"))
-                self.assertFalse(hasattr(app, "login_btn"))
-                self.assertTrue(hasattr(app, "record_hk_btn"))
-                for page_key in ("apps", "discord", "capture", "dashboard"):
-                    app._show_page(page_key)
-                app._show_discord_guide_tab("fixes")
-                app._show_discord_guide_tab("steps")
-                self.assertEqual(app.tutorial_step3_badge.cget("text"), "Needs hotkey")
-                with app.cfg_lock:
-                    app.cfg["auto_deafen"] = True
-                    app.cfg["deafen_hotkey"] = {"modifiers": ["ctrl", "shift"], "vk": ord("D"), "label": "Ctrl + Shift + D"}
-                app._update_sidebar_badges()
-                self.assertEqual(app.tutorial_step3_badge.cget("text"), "Ready (Ctrl + Shift + D)")
-                app._toggle_watching()
-                app._toggle_watching()
-                app._save_mute_percent()
-                app._on_close()
-        finally:
-            try:
-                root.destroy()
-            except Exception:
-                pass
-
     def test_death_after_passing_percent_always_undeafens(self) -> None:
         import time
 
@@ -761,98 +621,39 @@ class GDQuietTests(unittest.TestCase):
         self.assertEqual(mock_send.call_args_list[1].args[0], original_hotkey)
         self.assertFalse(ctrl.deafened_by_us)
 
-    def test_gui_pass_percent_then_death_and_force_restore(self) -> None:
-        import time
-        import tkinter as tk
-        import gdquiet
-
-        root = tk.Tk()
-        root.withdraw()
+    def test_pass_percent_then_death_and_force_restore(self) -> None:
         hotkey = {"modifiers": ["ctrl", "shift"], "vk": ord("D"), "label": "Ctrl + Shift + D"}
         cfg = dict(config.DEFAULT_CONFIG, auto_deafen=True, deafen_hotkey=hotkey)
-        try:
-            with (
-                patch.object(gdquiet, "load_config", return_value=cfg),
-                patch.object(gdquiet, "save_config"),
-                patch.object(gdquiet, "list_mute_targets", return_value=[]),
-                patch.object(gdquiet, "list_open_window_processes", return_value=[]),
-                patch.object(gdquiet, "ScreenPercentWatcher"),
-                patch("discord_hotkey.send_hotkey", return_value=True) as mock_hotkey,
-                patch("window_audio.AudioUtilities.GetAllSessions", return_value=[]),
-            ):
-                app = gdquiet.GDQuietApp(root)
-                app.discord_ctrl._toggle_cooldown_s = 0.02
+        with (
+            patch("discord_hotkey.send_hotkey", return_value=True) as mock_hotkey,
+            patch("window_audio.AudioUtilities.GetAllSessions", return_value=[]),
+            web_app(cfg) as (app, api),
+        ):
+            app.discord_ctrl._toggle_cooldown_s = 0.02
 
-                # Cross threshold -> should deafen Discord
-                app._on_screen_reading(
-                    screen_reader.ScreenReading(
-                        percent=62.0,
-                        raw_text="62%",
-                        should_mute=True,
-                        is_playing=True,
-                        status_text="Watching",
-                        preview_image=None,
-                        scan_ms=9.4,
-                    )
-                )
-                deadline = time.monotonic() + 2.0
-                while not app.discord_ctrl.deafened_by_us and time.monotonic() < deadline:
-                    time.sleep(0.01)
-                self.assertTrue(app.discord_ctrl.deafened_by_us)
+            # Cross the threshold: Discord is deafened.
+            app._on_screen_reading(reading(62.0, True))
+            self.assertTrue(wait_until(lambda: app.discord_ctrl.deafened_by_us))
 
-                # Die -> should undeafen reliably via serialized worker
-                app._on_screen_reading(
-                    screen_reader.ScreenReading(
-                        percent=0.0,
-                        raw_text="0%",
-                        should_mute=False,
-                        is_playing=True,
-                        status_text="Watching",
-                        preview_image=None,
-                        scan_ms=8.1,
-                    )
-                )
-                deadline = time.monotonic() + 2.0
-                while app.discord_ctrl.deafened_by_us and time.monotonic() < deadline:
-                    time.sleep(0.01)
-                self.assertFalse(app.discord_ctrl.deafened_by_us)
-                self.assertEqual(mock_hotkey.call_count, 2)
+            # Die: undeafened via the serialized worker.
+            app._on_screen_reading(reading(0.0, False))
+            self.assertTrue(wait_until(lambda: not app.discord_ctrl.deafened_by_us))
+            self.assertEqual(mock_hotkey.call_count, 2)
 
-                # Pass again and trigger failsafe Unmute & Undeafen button
-                app._on_screen_reading(
-                    screen_reader.ScreenReading(
-                        percent=75.0,
-                        raw_text="75%",
-                        should_mute=True,
-                        is_playing=True,
-                        status_text="Watching",
-                        preview_image=None,
-                        scan_ms=7.8,
-                    )
-                )
-                deadline = time.monotonic() + 2.0
-                while not app.discord_ctrl.deafened_by_us and time.monotonic() < deadline:
-                    time.sleep(0.01)
-                self.assertTrue(app.discord_ctrl.deafened_by_us)
+            # Pass again, then the "Unmute & undeafen all" failsafe.
+            app._on_screen_reading(reading(75.0, True))
+            self.assertTrue(wait_until(lambda: app.discord_ctrl.deafened_by_us))
+            api.force_restore_all()
+            self.assertTrue(wait_until(lambda: not app.discord_ctrl.deafened_by_us))
+            self.assertEqual(mock_hotkey.call_count, 4)
 
-                app._force_restore_all()
-                deadline = time.monotonic() + 2.0
-                while app.discord_ctrl.deafened_by_us and time.monotonic() < deadline:
-                    time.sleep(0.01)
-                self.assertFalse(app.discord_ctrl.deafened_by_us)
-                self.assertEqual(mock_hotkey.call_count, 4)
-
-                app._on_close()
-        finally:
-            try:
-                root.destroy()
-            except Exception:
-                pass
+            # Paused watching ignores a stale should_mute frame.
+            api.set_setting("watch_enabled", False)
+            app._on_screen_reading(reading(75.0, True))
+            self.assertFalse(app.current_want_mute)
 
     def test_global_watch_toggle_hotkey(self) -> None:
         import threading
-        import tkinter as tk
-        import gdquiet
 
         triggered = threading.Event()
 
@@ -875,45 +676,20 @@ class GDQuietTests(unittest.TestCase):
         finally:
             watcher.stop()
 
-        root = tk.Tk()
-        root.withdraw()
-        try:
-            with (
-                patch.object(gdquiet, "load_config", return_value=dict(config.DEFAULT_CONFIG)),
-                patch.object(gdquiet, "save_config"),
-                patch.object(gdquiet, "list_mute_targets", return_value=[]),
-                patch.object(gdquiet, "list_open_window_processes", return_value=[]),
-                patch.object(gdquiet, "ScreenPercentWatcher"),
-            ):
-                app = gdquiet.GDQuietApp(root)
-                with patch.object(app.global_hotkey, "set_hotkey", return_value=(True, "Active (Global)")):
-                    with app.cfg_lock:
-                        app.cfg["watch_toggle_hotkey"] = {"modifiers": ["ctrl", "shift"], "vk": 0x78, "label": "Ctrl + Shift + F9"}
-                    app._apply_watch_toggle_hotkey()
-                    self.assertEqual(app.watch_hk_var.get(), "Ctrl + Shift + F9")
-                    self.assertEqual(app.watch_hk_status_lbl.cget("text"), "Active (Global)")
-                    self.assertEqual(app.watch_toggle_btn.cget("text"), "Pause Watching (Ctrl + Shift + F9)")
-
-                    app._toggle_watching()
-                    self.assertFalse(app.cfg["watch_enabled"])
-                    self.assertEqual(app.watch_toggle_btn.cget("text"), "Resume Watching (Ctrl + Shift + F9)")
-
-                    app._toggle_watching()
-                    self.assertTrue(app.cfg["watch_enabled"])
-                    self.assertEqual(app.watch_toggle_btn.cget("text"), "Pause Watching (Ctrl + Shift + F9)")
-
-                with patch.object(app.global_hotkey, "set_hotkey", return_value=(False, "Inactive")):
-                    app._clear_watch_hotkey()
-                    self.assertIsNone(app.cfg["watch_toggle_hotkey"])
-                    self.assertEqual(app.watch_hk_var.get(), "Not set")
-                    self.assertEqual(app.watch_toggle_btn.cget("text"), "Pause Watching")
-
-                app._on_close()
-        finally:
-            try:
-                root.destroy()
-            except Exception:
-                pass
+        with web_app() as (app, api):
+            spec = {"modifiers": ["ctrl", "shift"], "vk": 0x78, "label": "Ctrl + Shift + F9"}
+            with patch.object(app.global_hotkey, "set_hotkey", return_value=(True, "Active (Global)")):
+                st = api.set_watch_hotkey(spec)
+                self.assertEqual(st["cfg"]["watch_toggle_hotkey"]["label"], "Ctrl + Shift + F9")
+                self.assertEqual(st["watch_hotkey_status"], "Active (Global)")
+                app._on_global_watch_toggle()
+                self.assertFalse(app.cfg["watch_enabled"])
+                app._on_global_watch_toggle()
+                self.assertTrue(app.cfg["watch_enabled"])
+            with patch.object(app.global_hotkey, "set_hotkey", return_value=(False, "Inactive")):
+                st = api.clear_watch_hotkey()
+                self.assertIsNone(st["cfg"]["watch_toggle_hotkey"])
+                self.assertEqual(st["watch_hotkey_status"], "Inactive")
 
     def test_audio_mute_chrome_multiple_sessions_same_pid_and_reenforce(self) -> None:
         tab1_manual = FakeSession("chrome.exe", 404, muted=1, instance_id="chrome-tab-1")
@@ -1084,111 +860,67 @@ class GDQuietTests(unittest.TestCase):
             self.assertFalse(stale.exists())
 
     def test_region_presets_and_capture_coords(self) -> None:
-        import tkinter as tk
-        import gdquiet
-
-        root = tk.Tk()
-        root.withdraw()
-        try:
-            with (
-                patch.object(gdquiet, "load_config", return_value=dict(config.DEFAULT_CONFIG)),
-                patch.object(gdquiet, "save_config"),
-                patch.object(gdquiet, "list_mute_targets", return_value=[]),
-                patch.object(gdquiet, "list_open_window_processes", return_value=[]),
-                patch.object(gdquiet, "ScreenPercentWatcher"),
-            ):
-                app = gdquiet.GDQuietApp(root)
-                app._apply_region_preset("Top Left", 0.0, 0.0, 0.28, 0.11)
-                self.assertEqual(app.cfg["watch_mode"], "custom_region")
-                self.assertEqual(app._describe_region_mode(), "Preset: Top Left")
-                self.assertEqual(app.summary_capture_btn.cget("text"), "Capture: Top Left (geometrydash.exe)")
-
-                with patch.object(screen_reader, "find_window_client_rect", return_value=(100, 50, 1000, 500)):
-                    rect, _label = screen_reader.compute_capture_rect(
-                        app.cfg["watch_mode"],
-                        app.cfg["target_process"],
-                        app.cfg["custom_region"],
-                    )
-                    self.assertEqual(rect, {"left": 100, "top": 50, "width": 280, "height": 55})
-                app._on_close()
-        finally:
-            try:
-                root.destroy()
-            except Exception:
-                pass
-
-    def test_update_banner_shows_and_dismisses_and_pause_guard(self) -> None:
-        import tkinter as tk
-        import gdquiet
-
-        root = tk.Tk()
-        root.withdraw()
-        try:
-            with (
-                patch.object(gdquiet, "load_config", return_value=dict(config.DEFAULT_CONFIG)),
-                patch.object(gdquiet, "save_config"),
-                patch.object(gdquiet, "list_mute_targets", return_value=[]),
-                patch.object(gdquiet, "list_open_window_processes", return_value=[]),
-                patch.object(gdquiet, "ScreenPercentWatcher"),
-            ):
-                app = gdquiet.GDQuietApp(root)
-                self.assertEqual(app.update_banner.winfo_manager(), "")
-
-                info1 = updater.UpdateInfo(
-                    current_version="3.0.8",
-                    latest_version="9.9.9",
-                    tag_name="v9.9.9",
-                    update_available=True,
-                    download_url="https://example.com/GDQuiet.exe",
-                    release_url="https://example.com",
-                    asset_name="GDQuiet.exe",
-                    size_bytes=1024,
-                    sha256="a" * 64,
-                    release_notes="",
+        with web_app() as (app, api):
+            st = api.set_region_preset("Top Left")
+            self.assertEqual(st["cfg"]["watch_mode"], "custom_region")
+            self.assertEqual(st["region_description"], "Preset: Top Left")
+            with patch.object(screen_reader, "find_window_client_rect", return_value=(100, 50, 1000, 500)):
+                rect, _label = screen_reader.compute_capture_rect(
+                    st["cfg"]["watch_mode"], st["cfg"]["target_process"], st["cfg"]["custom_region"]
                 )
-                app._on_update_checked(info1, silent=True)
-                self.assertEqual(app.update_banner.winfo_manager(), "pack")
-                self.assertIn("9.9.9", app.update_banner_lbl.cget("text"))
-                self.assertEqual(app.update_btn.cget("text"), "Install v9.9.9 Update")
+            self.assertEqual(rect, {"left": 100, "top": 50, "width": 280, "height": 55})
+            st = api.set_region_preset("auto")
+            self.assertEqual(st["cfg"]["watch_mode"], "auto_window")
 
-                app._dismiss_update_banner()
-                self.assertEqual(app.update_banner.winfo_manager(), "")
-                # Same version should stay dismissed on background re-check
-                app._on_update_checked(info1, silent=True)
-                self.assertEqual(app.update_banner.winfo_manager(), "")
+    def test_update_banner_shows_and_dismisses(self) -> None:
+        import web_ui
 
-                # Newer version shows the banner again
-                info2 = updater.UpdateInfo(**{**info1.__dict__, "latest_version": "9.9.10", "tag_name": "v9.9.10"})
-                app._on_update_checked(info2, silent=True)
-                self.assertEqual(app.update_banner.winfo_manager(), "pack")
-                self.assertIn("9.9.10", app.update_banner_lbl.cget("text"))
+        info1 = updater.UpdateInfo(
+            current_version="3.0.8",
+            latest_version="9.9.9",
+            tag_name="v9.9.9",
+            update_available=True,
+            download_url="https://example.com/GDQuiet-Setup.exe",
+            release_url="https://example.com",
+            asset_name="GDQuiet-Setup.exe",
+            size_bytes=1024,
+            sha256="a" * 64,
+            release_notes="### What's New\n- Thing",
+        )
+        info2 = updater.UpdateInfo(**{**info1.__dict__, "latest_version": "9.9.10", "tag_name": "v9.9.10"})
+        with web_app() as (app, api):
+            self.assertFalse(api.get_state()["show_update_banner"])
+            with (
+                patch.object(web_ui, "check_for_update", return_value=info1),
+                patch.object(app, "_refresh_latest_stable_locked"),
+            ):
+                app._check_updates_sync(silent=True)
+            st = api.get_state()
+            self.assertTrue(st["show_update_banner"])
+            self.assertEqual(st["pending_update"]["latest_version"], "9.9.9")
+            self.assertEqual(st["update_btn_text"], "Install v9.9.9 update")
 
-                # Pause watching guard ignores stale in-flight should_mute=True frame
-                with app.cfg_lock:
-                    app.cfg["watch_enabled"] = False
-                app._on_screen_reading(
-                    screen_reader.ScreenReading(
-                        percent=75.0,
-                        raw_text="75%",
-                        should_mute=True,
-                        is_playing=True,
-                        status_text="Watching",
-                        preview_image=None,
-                    )
-                )
-                self.assertFalse(app.current_want_mute)
+            st = api.dismiss_update_banner()
+            self.assertFalse(st["show_update_banner"])
+            # Same version stays dismissed after a background re-check.
+            with (
+                patch.object(web_ui, "check_for_update", return_value=info1),
+                patch.object(app, "_refresh_latest_stable_locked"),
+            ):
+                app._check_updates_sync(silent=True)
+            self.assertFalse(api.get_state()["show_update_banner"])
+            # A newer version shows it again.
+            with (
+                patch.object(web_ui, "check_for_update", return_value=info2),
+                patch.object(app, "_refresh_latest_stable_locked"),
+            ):
+                app._check_updates_sync(silent=True)
+            st = api.get_state()
+            self.assertTrue(st["show_update_banner"])
+            self.assertEqual(st["pending_update"]["latest_version"], "9.9.10")
 
-                app._on_close()
-        finally:
-            try:
-                root.destroy()
-            except Exception:
-                pass
-
-    def test_logo_and_icon_assets_load_in_app(self) -> None:
-        import tkinter as tk
+    def test_logo_icon_and_ui_assets_exist(self) -> None:
         from PIL import Image
-        import gdquiet
 
         repo_root = Path(__file__).resolve().parent.parent
         logo_path = repo_root / "logo.png"
@@ -1198,32 +930,9 @@ class GDQuietTests(unittest.TestCase):
         with Image.open(logo_path) as im:
             self.assertEqual(im.size, (256, 256))
             self.assertEqual(im.mode, "RGBA")
-
-        root = tk.Tk()
-        root.withdraw()
-        try:
-            with (
-                patch.object(gdquiet, "load_config", return_value=dict(config.DEFAULT_CONFIG)),
-                patch.object(gdquiet, "save_config"),
-                patch.object(gdquiet, "list_mute_targets", return_value=[]),
-                patch.object(gdquiet, "list_open_window_processes", return_value=[]),
-                patch.object(gdquiet, "ScreenPercentWatcher"),
-            ):
-                app = gdquiet.GDQuietApp(root)
-                self.assertIsNotNone(app._sidebar_logo_photo)
-                self.assertIsNotNone(app._window_icon_photo)
-                self.assertFalse(app.beta_updates_var.get())
-                self.assertFalse(app.level_detection_var.get())
-                self.assertIn("settings", app._pages)
-                self.assertIn("settings", app._nav_buttons)
-                app._show_page("settings")
-                self.assertEqual(app._active_page, "settings")
-                app._on_close()
-        finally:
-            try:
-                root.destroy()
-            except Exception:
-                pass
+        for rel in ("ui/index.html", "ui/app.js", "ui/styles.css", "assets/gdquiet.ico"):
+            self.assertTrue(common._resource_path(rel).is_file(), rel)
+        self.assertTrue(common._resource_path("logo.png").is_file())
 
     def test_audio_restore_and_expanded_terms(self) -> None:
         fake_session = FakeSession("spotify.exe", 111, muted=0, instance_id="inst1")
@@ -1322,54 +1031,33 @@ class GDQuietTests(unittest.TestCase):
         self.assertFalse(ctrl.is_muted)
 
     def test_apply_worker_retries_failed_audio_restore(self) -> None:
-        import threading
-        import time
-        import gdquiet
-
         class FakeAudioController:
             def __init__(self) -> None:
                 self.attempts = 0
                 self.is_muted = True
+                self.is_ducking = False
 
             @property
             def has_active_effect(self) -> bool:
                 return self.is_muted
 
-            def apply(self, _selected: list[str], mute: bool, duck_to: float | None = None) -> None:
-                if not mute:
-                    self.attempts += 1
-                    if self.attempts >= 2:
-                        self.is_muted = False
+            def restore(self) -> None:
+                self.attempts += 1
+                if self.attempts >= 2:
+                    self.is_muted = False
 
-        class FakeDiscordController:
-            def set_deafened(self, **_kwargs: object) -> None:
+            def apply(self, *_a, **_k) -> None:
                 pass
 
-        app = gdquiet.GDQuietApp.__new__(gdquiet.GDQuietApp)
-        app._apply_cond = threading.Condition()
-        app._pending_mute = False
-        app._pending_fade_volume = None
-        app._force_reapply = True
-        app._apply_stop = False
-        app.apply_lock = threading.Lock()
-        app.cfg_lock = threading.RLock()
-        app.cfg = {"selected_apps": [], "deafen_hotkey": None, "auto_deafen": False}
-        app.audio_ctrl = FakeAudioController()
-        app.discord_ctrl = FakeDiscordController()
-        app.root = SimpleNamespace(after=lambda *_args: None)
-        worker = threading.Thread(target=app._apply_worker, daemon=True)
-        worker.start()
-        try:
-            deadline = time.monotonic() + 2.0
-            while app.audio_ctrl.is_muted and time.monotonic() < deadline:
-                time.sleep(0.01)
-            self.assertFalse(app.audio_ctrl.is_muted)
-            self.assertEqual(app.audio_ctrl.attempts, 2)
-        finally:
-            with app._apply_cond:
-                app._apply_stop = True
-                app._apply_cond.notify_all()
-            worker.join(timeout=1.0)
+            def set_duck_volume(self, *_a, **_k) -> None:
+                pass
+
+        with web_app() as (app, _api):
+            fake = FakeAudioController()
+            app.audio_ctrl = fake
+            app._apply_mute_state(False)
+            self.assertTrue(wait_until(lambda: not fake.is_muted))
+            self.assertEqual(fake.attempts, 2)
 
     def test_web_ui_has_no_presets_and_wires_actions(self) -> None:
         import web_ui
@@ -1821,6 +1509,97 @@ class GDQuietTests(unittest.TestCase):
         auto = profiles.new_auto_added_profile("Bloodbath", "10565740")
         self.assertEqual(profiles.apply_level_profile(cfg, auto), cfg)
         self.assertEqual(profiles.apply_level_profile(cfg, {"mute_at_percent": "70"})["mute_at_percent"], 70.0)
+
+    def test_leaving_a_level_pauses_watching_that_a_level_turned_on(self) -> None:
+        cfg = dict(config.DEFAULT_CONFIG, level_label_enabled=True, watch_enabled=False)
+        with web_app(cfg) as (app, api):
+            api.add_level("clubstep startpos", 70, "111")
+            api.add_level("Off level", 40, "222")
+            api.set_level_enabled("id:222", False)
+
+            app._on_level_result("clubstep startpos (111)", "", None, "ok")
+            self.assertTrue(app.cfg["watch_enabled"])
+
+            # Switched-off level: watching goes back to paused.
+            app._on_level_result("Off level (222)", "", None, "ok")
+            self.assertFalse(app.cfg["watch_enabled"])
+            self.assertIn("isn't switched on", api.get_state()["footer_message"])
+
+            # Unknown level also pauses it.
+            app._on_level_result("clubstep startpos (111)", "", None, "ok")
+            self.assertTrue(app.cfg["watch_enabled"])
+            app._on_level_result("Never seen (333)", "", None, "ok")
+            self.assertFalse(app.cfg["watch_enabled"])
+
+            # Closing the game pauses it too.
+            app._on_level_result("clubstep startpos (111)", "", None, "ok")
+            self.assertTrue(app.cfg["watch_enabled"])
+            app._on_level_result(None, None, None, "no_window")
+            self.assertFalse(app.cfg["watch_enabled"])
+
+            # Switching off the level being played pauses it.
+            app._on_level_result("clubstep startpos (111)", "", None, "ok")
+            self.assertTrue(app.cfg["watch_enabled"])
+            api.set_level_enabled("id:111", False)
+            self.assertFalse(app.cfg["watch_enabled"])
+
+    def test_manual_watching_is_never_auto_paused(self) -> None:
+        cfg = dict(config.DEFAULT_CONFIG, level_label_enabled=True, watch_enabled=True)
+        with web_app(cfg) as (app, api):
+            api.add_level("A", 70, "111")
+            # Watching was already on (user's choice): leaving levels never pauses it.
+            app._on_level_result("A (111)", "", None, "ok")
+            app._on_level_result("Unknown (999)", "", None, "ok")
+            self.assertTrue(app.cfg["watch_enabled"])
+
+            # A level turns it on, then the user takes over: no auto-pause after that.
+            api.set_setting("watch_enabled", False)
+            app._on_level_result("A (111)", "", None, "ok")
+            self.assertTrue(app.cfg["watch_enabled"])
+            api.toggle_watching()
+            api.toggle_watching()
+            app._on_level_result("Unknown 2 (998)", "", None, "ok")
+            self.assertTrue(app.cfg["watch_enabled"])
+
+    def test_per_level_app_picker(self) -> None:
+        cfg = dict(config.DEFAULT_CONFIG, level_label_enabled=True, selected_apps=["chrome.exe"])
+        with web_app(cfg) as (app, api):
+            api.add_level("A", 70, "111")
+            row = next(r for r in api.get_state()["levels"] if r["key"] == "id:111")
+            self.assertTrue(row["has_apps"])
+            self.assertEqual(row["apps"], ["chrome.exe"])
+
+            st = api.set_level_apps("id:111", ["Spotify.exe", "discord.exe", " "])
+            row = next(r for r in st["levels"] if r["key"] == "id:111")
+            self.assertEqual(row["apps"], ["discord.exe", "spotify.exe"])
+            self.assertEqual(st["cfg"]["selected_apps"], ["chrome.exe"])  # not the active level
+
+            # Applied immediately to the level you're playing.
+            app._on_level_result("A (111)", "", None, "ok")
+            self.assertEqual(app.cfg["selected_apps"], ["discord.exe", "spotify.exe"])
+            st = api.set_level_apps("id:111", ["obs64.exe"])
+            self.assertEqual(st["cfg"]["selected_apps"], ["obs64.exe"])
+
+            # "Use my current apps": the level stops changing the selection.
+            st = api.set_level_apps("id:111", None)
+            row = next(r for r in st["levels"] if r["key"] == "id:111")
+            self.assertFalse(row["has_apps"])
+            self.assertNotIn("selected_apps", st["cfg"]["level_profiles"]["id:111"])
+            api.toggle_app("vlc.exe")
+            app._on_level_result("Other (5)", "", None, "ok")
+            app._on_level_result("A (111)", "", None, "ok")
+            self.assertIn("vlc.exe", app.cfg["selected_apps"])
+
+    def test_synced_levels_replace_local_only_when_unchanged(self) -> None:
+        with web_app() as (app, api):
+            api.add_level("A", 70, "111")
+            expected = app._get_level_profiles()
+            new = {**expected, "id:222": {"name": "B", "level_id": "222", "enabled": True, "mute_at_percent": 40.0}}
+            self.assertTrue(app._replace_level_profiles(new, expected))
+            self.assertIn("id:222", api.get_state()["cfg"]["level_profiles"])
+            # Stale snapshot: refused.
+            self.assertFalse(app._replace_level_profiles({}, expected))
+            self.assertIn("level_sync", api.get_state())
 
     def test_web_ui_turns_off_saved_beta_updates_on_start(self) -> None:
         import web_ui

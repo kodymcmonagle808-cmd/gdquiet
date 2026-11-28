@@ -14,9 +14,13 @@ from functools import cmp_to_key
 from pathlib import Path
 from typing import Callable
 
-APP_VERSION = "4.5.3"
+APP_VERSION = "4.6.0"
 PATCH_NOTES = """\
-- Fixed: patch notes in the update banner now show as a proper list with headings instead of raw text like "###" and "-"
+- New: your levels sync between PCs while you're signed in with Discord (Levels tab shows sync status and has Sync now)
+- New: watching pauses again when you move to a level that's switched off or close the game, if a level turned it on. Watching you turned on yourself is never paused
+- New: choose which apps each level mutes. Click a level's app count on the Levels tab
+- Faster, lighter app: removed the old built-in window UI that was no longer used
+- Builds now use pinned library versions and updated GitHub Actions for more reliable releases
 """.strip()
 GITHUB_REPO = "kodymcmonagle808-cmd/gdquiet"
 RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"

@@ -43,52 +43,6 @@ EXTENDED_VKS = {
     0xA3, 0xA5,              # RControl, RMenu
 }
 
-KEYSYM_TO_VK: dict[str, tuple[int, str]] = {
-    "BackSpace": (0x08, "Backspace"),
-    "Tab": (0x09, "Tab"),
-    "Return": (0x0D, "Enter"),
-    "Pause": (0x13, "Pause"),
-    "Caps_Lock": (0x14, "CapsLock"),
-    "Escape": (0x1B, "Esc"),
-    "space": (0x20, "Space"),
-    "Prior": (0x21, "PageUp"),
-    "Next": (0x22, "PageDown"),
-    "End": (0x23, "End"),
-    "Home": (0x24, "Home"),
-    "Left": (0x25, "Left"),
-    "Up": (0x26, "Up"),
-    "Right": (0x27, "Right"),
-    "Down": (0x28, "Down"),
-    "Insert": (0x2D, "Insert"),
-    "Delete": (0x2E, "Delete"),
-    "KP_Add": (0x6B, "Num +"),
-    "KP_Subtract": (0x6D, "Num -"),
-    "KP_Multiply": (0x6A, "Num *"),
-    "KP_Divide": (0x6F, "Num /"),
-    "KP_Decimal": (0x6E, "Num ."),
-    "minus": (0xBD, "-"),
-    "equal": (0xBB, "="),
-    "bracketleft": (0xDB, "["),
-    "bracketright": (0xDD, "]"),
-    "backslash": (0xDC, "\\"),
-    "semicolon": (0xBA, ";"),
-    "apostrophe": (0xDE, "'"),
-    "comma": (0xBC, ","),
-    "period": (0xBE, "."),
-    "slash": (0xBF, "/"),
-    "grave": (0xC0, "`"),
-}
-for _i in range(1, 25):
-    KEYSYM_TO_VK[f"F{_i}"] = (0x70 + (_i - 1), f"F{_i}")
-
-MODIFIER_KEYSYMS = {
-    "Control_L", "Control_R",
-    "Shift_L", "Shift_R",
-    "Alt_L", "Alt_R",
-    "Super_L", "Super_R",
-    "Meta_L", "Meta_R",
-}
-
 ULONG_PTR = ctypes.c_uint64 if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_uint32
 
 
@@ -170,51 +124,6 @@ def send_hotkey(hotkey: dict[str, Any]) -> bool:
     up_arr = (INPUT * len(up_inputs))(*up_inputs)
     sent_up = user32.SendInput(len(up_inputs), up_arr, ctypes.sizeof(INPUT))
     return sent_down > 0 and sent_up > 0
-
-
-def parse_tk_hotkey(event: Any) -> dict[str, Any] | None:
-    keysym = str(getattr(event, "keysym", "") or "")
-    if not keysym or keysym in MODIFIER_KEYSYMS:
-        return None
-
-    state = int(getattr(event, "state", 0) or 0)
-    modifiers: list[str] = []
-    if state & 0x0004:
-        modifiers.append("ctrl")
-    if state & 0x0001:
-        modifiers.append("shift")
-    if state & 0x20000 or state & 0x0008:
-        modifiers.append("alt")
-
-    vk: int | None = None
-    key_label: str = ""
-
-    if keysym in KEYSYM_TO_VK:
-        vk, key_label = KEYSYM_TO_VK[keysym]
-    elif len(keysym) == 1 and keysym.isalnum():
-        ch = keysym.upper()
-        vk = ord(ch)
-        key_label = ch
-    elif keysym.startswith("KP_") and len(keysym) == 4 and keysym[3].isdigit():
-        digit = int(keysym[3])
-        vk = 0x60 + digit
-        key_label = f"Num {digit}"
-    else:
-        keycode = int(getattr(event, "keycode", 0) or 0)
-        if 8 <= keycode <= 254:
-            vk = keycode
-            key_label = keysym.upper()
-
-    if vk is None:
-        return None
-
-    pretty_mods = [{"ctrl": "Ctrl", "shift": "Shift", "alt": "Alt"}[m] for m in modifiers]
-    label = " + ".join([*pretty_mods, key_label])
-    return {
-        "modifiers": modifiers,
-        "vk": vk,
-        "label": label,
-    }
 
 
 class DiscordDeafenController:

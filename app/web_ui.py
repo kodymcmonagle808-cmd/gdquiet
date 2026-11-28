@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import atexit
+from copy import deepcopy
 import base64
 import ctypes
 from ctypes import wintypes
@@ -20,6 +21,7 @@ import psutil
 import webview
 
 from auth import DiscordAuth
+from level_sync import LevelSync
 from config import DEFAULT_CONFIG, app_data_dir, config_path, load_config, save_config
 from discord_hotkey import DiscordDeafenController, GlobalHotkeyWatcher, send_hotkey
 from obs_overlay import OverlayServer
@@ -63,7 +65,7 @@ from window_audio import (
     list_open_window_processes,
 )
 
-from gdquiet import (
+from common import (
     PERCENT_PRESETS,
     RegionSelectorOverlay,
     _resource_path,
@@ -281,10 +283,16 @@ class GDQuietWebApp:
         self._level_detection_error = ""
         self._level_scan_status = "idle"
         self._last_level_scan_at = 0.0
+        # True while watching is on only because a switched-on level turned it on.
+        # Leaving that level pauses watching again; any manual change clears it.
+        self._watch_auto_on = False
         self._level_test: dict[str, Any] | None = None
 
         self.auth = DiscordAuth(app_data_dir() / "session.bin")
         self.auth.load()
+        self.level_sync = LevelSync(
+            self.auth, app_data_dir(), self._get_level_profiles, self._replace_level_profiles
+        )
 
         self.obs_overlay_server = OverlayServer(
             get_status=self._get_obs_overlay_status,
@@ -315,6 +323,7 @@ class GDQuietWebApp:
             on_level_result=self._on_level_result,
         )
         self.watcher.start()
+        self.level_sync.start()
 
         self._start_tray_icon()
         atexit.register(self._cleanup_sync)
@@ -670,6 +679,7 @@ class GDQuietWebApp:
                 "test": self._level_test,
             },
             "account": self.auth.to_state(),
+            "level_sync": self.level_sync.to_state(),
             "levels": self._levels_state(cfg_copy),
             "beta_updates_notice": self._beta_notice,
             "pending_update": pending_upd,
@@ -751,6 +761,7 @@ class GDQuietWebApp:
         elif key == "show_background_audio":
             self._refresh_windows()
         elif key == "watch_enabled":
+            self._watch_auto_on = False
             self._tray_audio_override = None
             if not value:
                 self._apply_mute_state(False)
@@ -784,6 +795,7 @@ class GDQuietWebApp:
             new_state = not bool(self.cfg.get("watch_enabled", True))
             self.cfg["watch_enabled"] = new_state
         self._save_cfg()
+        self._watch_auto_on = False
         self._tray_audio_override = None
         if not new_state:
             self._apply_mute_state(False)
@@ -1073,7 +1085,21 @@ class GDQuietWebApp:
         if self.cfg.get("watch_enabled", True):
             return False
         self.cfg["watch_enabled"] = True
+        self._watch_auto_on = True
         self._tray_audio_override = None
+        return True
+
+    def _pause_auto_watching(self, reason: str) -> bool:
+        """Pause watching if (and only if) a level turned it on. Returns True if paused."""
+        if not self._watch_auto_on:
+            return False
+        with self.cfg_lock:
+            self.cfg["watch_enabled"] = False
+        self._watch_auto_on = False
+        self._tray_audio_override = None
+        self._save_cfg()
+        self._apply_mute_state(False)
+        self._footer_message = reason
         return True
 
     def _activate_level_profile(self, level_label: str, key: str) -> None:
@@ -1086,11 +1112,13 @@ class GDQuietWebApp:
         """
         watch_turned_on = False
         added = False
+        level_is_on = False
         with self.cfg_lock:
             profiles = dict(self.cfg.get("level_profiles") or {})
             profile = profiles.get(key)
             if isinstance(profile, dict):
                 if profile_enabled(profile):
+                    level_is_on = True
                     watch_turned_on = self._apply_enabled_level(profile)
             elif self.cfg.get("level_auto_add", False):
                 name, level_id = split_level_id(level_label)
@@ -1104,6 +1132,10 @@ class GDQuietWebApp:
             self._active_level_name = format_level_label(*split_level_id(level_label))
         self._active_level_key = key
         self._save_cfg()
+        if not level_is_on and self._pause_auto_watching(
+            f"Watching paused: {self._active_level_name} isn't switched on."
+        ):
+            return
         if watch_turned_on:
             self._footer_message = f"Watching turned on for {self._active_level_name}."
         elif added:
@@ -1130,6 +1162,8 @@ class GDQuietWebApp:
                     "threshold": profile_threshold(profile),
                     "enabled": profile_enabled(profile),
                     "app_count": len(profile.get("selected_apps") or []),
+                    "apps": list(profile.get("selected_apps") or []),
+                    "has_apps": isinstance(profile.get("selected_apps"), list),
                     "active": key == self._active_level_key,
                 }
             )
@@ -1183,6 +1217,8 @@ class GDQuietWebApp:
                 if enabled and key == self._active_level_key:
                     self._apply_enabled_level(profiles[key])
         self._save_cfg()
+        if not enabled and key == self._active_level_key:
+            self._pause_auto_watching(f"Watching paused: {self._active_level_name} was switched off.")
         return self.get_state()
 
     def set_level_threshold(self, key: str, threshold: Any) -> dict[str, Any]:
@@ -1205,6 +1241,31 @@ class GDQuietWebApp:
         self._save_cfg()
         return self.get_state()
 
+    def set_level_apps(self, key: str, apps: Any) -> dict[str, Any]:
+        """Choose which apps a level mutes. `apps=None` clears the choice so the
+        level leaves your current app selection alone."""
+        with self.cfg_lock:
+            profiles = dict(self.cfg.get("level_profiles") or {})
+            profile = profiles.get(key)
+            if not isinstance(profile, dict):
+                return self.get_state()
+            updated = dict(profile)
+            if apps is None:
+                updated.pop("selected_apps", None)
+            else:
+                names = sorted(
+                    {str(a).strip().lower() for a in (apps or []) if isinstance(a, str) and str(a).strip()}
+                )
+                updated["selected_apps"] = names
+                if key == self._active_level_key and profile_enabled(updated):
+                    self.cfg["selected_apps"] = list(names)
+            profiles[key] = updated
+            self.cfg["level_profiles"] = profiles
+        self._save_cfg()
+        if apps is not None and key == self._active_level_key and self.current_want_mute:
+            self._apply_mute_state(True, force_reapply=True)
+        return self.get_state()
+
     def delete_level(self, key: str) -> dict[str, Any]:
         with self.cfg_lock:
             profiles = dict(self.cfg.get("level_profiles") or {})
@@ -1213,9 +1274,32 @@ class GDQuietWebApp:
         if key == self._active_level_key:
             self._active_level_key = ""
             self._active_level_name = ""
+            self._pause_auto_watching("Watching paused: the level you were playing was removed.")
         self._save_cfg()
         if isinstance(removed, dict):
             self._footer_message = f"Removed {removed.get('name') or key}."
+        return self.get_state()
+
+    # ---- Level sync (Discord account) ----
+
+    def _get_level_profiles(self) -> dict[str, Any]:
+        with self.cfg_lock:
+            return deepcopy(dict(self.cfg.get("level_profiles") or {}))
+
+    def _replace_level_profiles(self, new: dict[str, Any], expected: dict[str, Any]) -> bool:
+        """Swap in synced levels unless the user changed them since the sync started."""
+        with self.cfg_lock:
+            if dict(self.cfg.get("level_profiles") or {}) != expected:
+                return False
+            self.cfg["level_profiles"] = deepcopy(new)
+        if self._active_level_key and self._active_level_key not in new:
+            self._active_level_key = ""
+            self._active_level_name = ""
+        self._save_cfg()
+        return True
+
+    def sync_levels_now(self) -> dict[str, Any]:
+        self.level_sync.request_sync()
         return self.get_state()
 
     # ---- Discord account (Supabase) ----
@@ -1272,6 +1356,10 @@ class GDQuietWebApp:
             self._level_scan_status = "covered"
         elif raw is None:
             self._level_scan_status = "no_window"
+            if self._active_level_key:
+                self._active_level_key = ""
+                self._active_level_name = ""
+            self._pause_auto_watching("Watching paused: Geometry Dash was closed.")
         else:
             self._last_level_label_raw = raw.strip()
             self._level_detection_error = ""
@@ -1793,6 +1881,10 @@ class GDQuietWebApp:
             return
         self._closing = True
         try:
+            self.level_sync.stop()
+        except Exception:
+            pass
+        try:
             self.watcher.stop()
         except Exception:
             pass
@@ -1927,11 +2019,17 @@ class WebApi:
     def set_level_threshold(self, key: str, threshold: Any) -> dict[str, Any]:
         return self._app.set_level_threshold(key, threshold)
 
+    def set_level_apps(self, key: str, apps: Any) -> dict[str, Any]:
+        return self._app.set_level_apps(key, apps)
+
     def delete_level(self, key: str) -> dict[str, Any]:
         return self._app.delete_level(key)
 
     def test_level_detection(self) -> dict[str, Any]:
         return self._app.test_level_detection()
+
+    def sync_levels_now(self) -> dict[str, Any]:
+        return self._app.sync_levels_now()
 
     def discord_sign_in(self) -> dict[str, Any]:
         return self._app.discord_sign_in()

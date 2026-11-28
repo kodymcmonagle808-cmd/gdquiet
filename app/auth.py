@@ -449,6 +449,19 @@ class DiscordAuth:
 
     # ---- UI state ----
 
+    @property
+    def signed_in(self) -> bool:
+        with self._lock:
+            return self._session is not None
+
+    def user_id(self) -> str | None:
+        """Supabase user id (auth.users.id) of the signed-in user, or None."""
+        with self._lock:
+            session = self._session
+        if session is None:
+            return None
+        return str((session.get("user") or {}).get("id") or "") or None
+
     def to_state(self) -> dict[str, Any]:
         with self._lock:
             session = self._session

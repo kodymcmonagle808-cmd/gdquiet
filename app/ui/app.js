@@ -373,6 +373,8 @@
   }
 
   let levelsSignature = "";
+  let editingAppsKey = null; // level whose app picker is open
+  let appsDraft = new Set(); // apps ticked in the open picker
   let armedDeleteKey = null;
   let armedDeleteTimer = null;
 
@@ -396,6 +398,39 @@
     const raw = (info.last_raw || "").replace(/\s+/g, " ").trim();
     $("lvl-raw").textContent = "Raw OCR: " + (raw ? raw.slice(0, 120) : on ? "(nothing read yet)" : "(off)");
     renderLevels(state.levels || []);
+    renderLevelSync(state);
+  }
+
+  function timeAgo(unixSeconds) {
+    const s = Math.max(0, Math.round(Date.now() / 1000 - unixSeconds));
+    if (s < 10) return "just now";
+    if (s < 60) return `${s}s ago`;
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+    return `${Math.floor(s / 3600)}h ago`;
+  }
+
+  function renderLevelSync(state) {
+    const sync = state.level_sync || {};
+    const account = state.account || {};
+    const signedIn = account.status === "signed_in" || (account.status === "waiting" && account.user);
+    let text;
+    let dot = "wait";
+    if (!signedIn) {
+      text = "Sign in with Discord to sync your levels between PCs.";
+    } else if (sync.status === "error") {
+      text = "Sync problem: " + (sync.message || "unknown error");
+      dot = "bad";
+    } else if (sync.status === "syncing" && !sync.last_sync_at) {
+      text = "Syncing your levels…";
+    } else if (sync.last_sync_at) {
+      text = `Synced to your Discord account · ${timeAgo(sync.last_sync_at)}`;
+      dot = "ok";
+    } else {
+      text = "Waiting to sync your levels…";
+    }
+    $("lvl-sync-txt").textContent = text;
+    $("lvl-sync-dot").className = "dot " + dot;
+    $("lvl-sync-btn").hidden = !signedIn;
   }
 
   function renderLevelTest(test) {
@@ -448,26 +483,61 @@
     $("lvl-empty").hidden = allLevels.length > 0;
     $("lvl-nomatch").hidden = !(allLevels.length > 0 && levels.length === 0);
     // Only rebuild when something changed, and never while the user is typing in a row.
-    const sig = JSON.stringify(levels) + "|" + armedDeleteKey + "|" + query;
-    if (sig === levelsSignature || list.contains(document.activeElement)) return;
+    const targets = (latestState && latestState.targets) || [];
+    const sig =
+      JSON.stringify(levels) +
+      "|" + armedDeleteKey + "|" + query + "|" + editingAppsKey + "|" + [...appsDraft].sort().join(",") +
+      "|" + targets.map((t) => t.process_name).join(",");
+    const typing =
+      document.activeElement && list.contains(document.activeElement) && document.activeElement.matches("input[data-level-threshold]");
+    if (sig === levelsSignature || typing) return;
     levelsSignature = sig;
     list.innerHTML = levels
       .map((l) => {
         const key = escapeHtml(l.key);
         const armed = armedDeleteKey === l.key;
-        const apps = l.app_count === 1 ? "1 app" : `${l.app_count} apps`;
+        const apps = !l.has_apps ? "Current apps" : l.app_count === 1 ? "1 app" : `${l.app_count} apps`;
         const idTxt = l.level_id ? `ID ${escapeHtml(l.level_id)} · ` : "No ID · ";
         return `<div class="lvl-row${l.enabled ? "" : " off"}${l.active ? " active" : ""}" data-key="${key}">
           <div class="lvl-main">
             <b title="${escapeHtml(l.name)}">${escapeHtml(l.name)}</b>
-            <span>${l.active ? '<em>Playing now</em> · ' : ""}${idTxt}${apps}</span>
+            <span>${l.active ? '<em>Playing now</em> · ' : ""}${idTxt}<button type="button" class="lvl-apps-btn" data-level-apps title="Choose which apps this level mutes">${apps}</button></span>
           </div>
           <div class="val lvl-pct"><input class="inp" data-level-threshold value="${l.threshold === null || l.threshold === undefined ? "" : Number(l.threshold)}" placeholder="—" aria-label="Threshold for ${escapeHtml(l.name)}" /><span class="unit">%</span></div>
           <button type="button" class="toggle${l.enabled ? " on" : ""}" data-level-toggle aria-label="Use settings for ${escapeHtml(l.name)}"></button>
           <button type="button" class="lvl-del${armed ? " armed" : ""}" data-level-delete>${armed ? "Confirm" : "Remove"}</button>
-        </div>`;
+        </div>${editingAppsKey === l.key ? renderAppsPicker(l, targets) : ""}`;
       })
       .join("");
+  }
+
+  function renderAppsPicker(level, targets) {
+    const names = new Map();
+    targets.forEach((t) => names.set(t.process_name.toLowerCase(), t.display_name || t.process_name));
+    // Keep apps the level already has even if they aren't open right now.
+    (level.apps || []).forEach((a) => {
+      if (!names.has(a)) names.set(a, a + " (not open)");
+    });
+    const items = [...names.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+    const rows = items.length
+      ? items
+          .map(
+            ([proc, label]) =>
+              `<label class="lvl-app"><input type="checkbox" data-app-proc="${escapeHtml(proc)}"${
+                appsDraft.has(proc) ? " checked" : ""
+              } /><span>${escapeHtml(label)}</span></label>`
+          )
+          .join("")
+      : '<div class="lvl-apps-empty">No apps with open windows found. Open the apps you want muted, then try again.</div>';
+    return `<div class="lvl-apps" data-key="${escapeHtml(level.key)}">
+      <div class="lvl-apps-head">Apps muted for <b>${escapeHtml(level.name)}</b></div>
+      <div class="lvl-apps-list">${rows}</div>
+      <div class="lvl-apps-actions">
+        <button type="button" class="btn primary sm" data-apps-save>Save apps</button>
+        <button type="button" class="btn ghost sm" data-apps-clear title="This level won't change which apps are selected">Use my current apps</button>
+        <button type="button" class="btn ghost sm" data-apps-cancel>Cancel</button>
+      </div>
+    </div>`;
   }
 
   function renderBetaNotice(state) {
@@ -978,6 +1048,9 @@
       flashSaved();
     });
 
+    $("lvl-sync-btn").addEventListener("click", async () => {
+      await mutate((a) => a.sync_levels_now());
+    });
     $("lvl-test-btn").addEventListener("click", async () => {
       const btn = $("lvl-test-btn");
       btn.disabled = true;
@@ -1011,9 +1084,39 @@
     });
     const levelList = $("lvl-list");
     levelList.addEventListener("click", async (e) => {
+      const picker = e.target.closest(".lvl-apps");
+      if (picker) {
+        const key = picker.dataset.key;
+        if (e.target.closest("[data-apps-save]")) {
+          const apps = [...appsDraft];
+          editingAppsKey = null;
+          await mutate((a) => a.set_level_apps(key, apps));
+          flashSaved();
+        } else if (e.target.closest("[data-apps-clear]")) {
+          editingAppsKey = null;
+          await mutate((a) => a.set_level_apps(key, null));
+          flashSaved();
+        } else if (e.target.closest("[data-apps-cancel]")) {
+          editingAppsKey = null;
+          if (latestState) renderLevels(latestState.levels || []);
+        }
+        return;
+      }
       const row = e.target.closest(".lvl-row");
       if (!row) return;
       const key = row.dataset.key;
+      if (e.target.closest("[data-level-apps]")) {
+        if (editingAppsKey === key) {
+          editingAppsKey = null;
+        } else {
+          const level = ((latestState && latestState.levels) || []).find((l) => l.key === key);
+          editingAppsKey = key;
+          appsDraft = new Set(((level && level.apps) || []).map((a) => a.toLowerCase()));
+        }
+        document.activeElement && document.activeElement.blur();
+        if (latestState) renderLevels(latestState.levels || []);
+        return;
+      }
       if (e.target.closest("[data-level-toggle]")) {
         const tog = e.target.closest("[data-level-toggle]");
         const next = !tog.classList.contains("on");
@@ -1044,6 +1147,12 @@
       flashSaved();
     };
     levelList.addEventListener("change", (e) => {
+      if (e.target.matches("[data-app-proc]")) {
+        const proc = e.target.dataset.appProc;
+        if (e.target.checked) appsDraft.add(proc);
+        else appsDraft.delete(proc);
+        return;
+      }
       if (e.target.matches("[data-level-threshold]")) saveLevelThreshold(e.target);
     });
     levelList.addEventListener("keydown", (e) => {
