@@ -1653,6 +1653,96 @@ class GDQuietTests(unittest.TestCase):
             finally:
                 app._cleanup_sync()
 
+    def test_level_id_parsing_from_eclipse_label(self) -> None:
+        split = screen_reader.split_level_id
+        self.assertEqual(split("clubstep startpos (12345678)"), ("clubstep startpos", "12345678"))
+        # OCR reading 1 as I/l and dropping the opening bracket.
+        self.assertEqual(split("clubstep startpos (I2345678)"), ("clubstep startpos", "12345678"))
+        self.assertEqual(split("clubstep startpos 12345678)"), ("clubstep startpos", "12345678"))
+        self.assertEqual(split("Sky (00123)"), ("Sky", "123"))
+        # A number that's part of the name isn't an ID.
+        self.assertEqual(split("Bloodbath 2"), ("Bloodbath 2", None))
+        self.assertEqual(split("clubstep startpos"), ("clubstep startpos", None))
+
+        pick = screen_reader.extract_level_name_from_label_text
+        # Short names with long IDs must not be mistaken for stats.
+        self.assertEqual(pick("FPS: 240\nSky (98765432)"), "Sky (98765432)")
+        self.assertEqual(pick("0/0/0 CPS\nclubstep startpos (128)"), "clubstep startpos (128)")
+        # A lone short bracketed number is noise.
+        self.assertIsNone(pick("(2)"))
+
+        same = screen_reader.same_level_label
+        self.assertTrue(same("Startpos (111)", "c!ubstep (111)"))  # same ID, name ignored
+        self.assertFalse(same("clubstep startpos (111)", "clubstep startpos (222)"))  # same name, different ID
+        self.assertTrue(same("clubstep startpos", "clubstep sii@ttpos"))  # no IDs: names
+
+    def test_level_id_profiles_match_by_id_only(self) -> None:
+        saved = {
+            "id:111": {"name": "clubstep startpos", "level_id": "111"},
+            "id:222": {"name": "clubstep startpos", "level_id": "222"},
+            "deadlocked": {"name": "Deadlocked"},
+        }
+        find = profiles.find_matching_profile
+        self.assertEqual(find(saved, "clubstep startpos (222)"), "id:222")
+        self.assertEqual(find(saved, "totally misread name (111)"), "id:111")
+        # Unknown ID: never fall back to a same-named level.
+        self.assertIsNone(find(saved, "clubstep startpos (333)"))
+        self.assertIsNone(find(saved, "Deadlocked (444)"))
+        # Name-only labels still match by name.
+        self.assertEqual(find(saved, "DEADLOCKED"), "deadlocked")
+        self.assertEqual(profiles.level_key("x", "00123"), "id:123")
+        self.assertEqual(profiles.level_key("Stereo Madness", None), "stereomadness")
+
+    def test_web_ui_levels_with_same_name_are_kept_apart_by_id(self) -> None:
+        import web_ui
+
+        cfg = dict(config.DEFAULT_CONFIG)
+        cfg["level_label_enabled"] = True
+        with (
+            patch.object(web_ui, "load_config", return_value=cfg),
+            patch.object(web_ui, "save_config"),
+            patch.object(web_ui, "list_mute_targets", return_value=[]),
+            patch.object(web_ui, "list_open_window_processes", return_value=["geometrydash.exe"]),
+            patch.object(web_ui, "ScreenPercentWatcher"),
+            patch.object(web_ui.DiscordAuth, "load"),
+        ):
+            app = web_ui.GDQuietWebApp()
+            try:
+                api = web_ui.WebApi(app)
+                api.add_level("clubstep startpos", 60, "111")
+                st = api.add_level("clubstep startpos", 85, "222")
+                rows = {r["key"]: r for r in st["levels"]}
+                self.assertEqual(set(rows), {"id:111", "id:222"})
+                self.assertEqual(rows["id:222"]["level_id"], "222")
+                self.assertEqual(rows["id:222"]["name"], "clubstep startpos")
+                # "Name (ID)" typed in the name box works too.
+                st = api.add_level("Sky (98765432)", 40)
+                self.assertIn("id:98765432", st["cfg"]["level_profiles"])
+                st = api.add_level("Sky", 40, "12ab")
+                self.assertEqual(st["footer_message"], "The level ID can only contain numbers.")
+
+                app._on_level_result("clubstep startpos (222)", "clubstep startpos (222)", None, "ok")
+                st = api.get_state()
+                self.assertEqual(st["level_label"]["active_level"], "clubstep startpos (222)")
+                self.assertEqual(st["cfg"]["mute_at_percent"], 85.0)
+                app._on_level_result("clubstep startpos (111)", "clubstep startpos (111)", None, "ok")
+                self.assertEqual(api.get_state()["cfg"]["mute_at_percent"], 60.0)
+
+                # A new ID with a known name becomes its own level, keyed by ID.
+                api.set_threshold(33)
+                app._on_level_result("clubstep startpos (333)", "clubstep startpos (333)", None, "ok")
+                st = api.get_state()
+                self.assertEqual(st["cfg"]["level_profiles"]["id:333"]["level_id"], "333")
+                self.assertEqual(st["cfg"]["level_profiles"]["id:333"]["name"], "clubstep startpos")
+                self.assertEqual(st["cfg"]["level_profiles"]["id:111"]["mute_at_percent"], 60.0)
+
+                # Saving keeps the clean name and the ID.
+                api.save_setup()
+                saved = api.get_state()["cfg"]["level_profiles"]["id:333"]
+                self.assertEqual((saved["name"], saved["level_id"], saved["mute_at_percent"]), ("clubstep startpos", "333", 33.0))
+            finally:
+                app._cleanup_sync()
+
     def test_web_ui_turns_off_saved_beta_updates_on_start(self) -> None:
         import web_ui
 

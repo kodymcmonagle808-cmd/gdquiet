@@ -18,7 +18,7 @@ from PIL import Image, ImageEnhance, ImageTk
 from config import DEFAULT_CONFIG, app_data_dir, config_path, load_config, save_config
 from discord_hotkey import DiscordDeafenController, GlobalHotkeyWatcher, parse_tk_hotkey, send_hotkey
 from obs_overlay import OverlayServer
-from profiles import apply_level_profile, build_level_profile, profile_key
+from profiles import apply_level_profile, build_level_profile, find_matching_profile, level_key, profile_key
 from screen_reader import (
     ScreenPercentWatcher,
     ScreenReading,
@@ -26,6 +26,7 @@ from screen_reader import (
     WinRtPercentOcr,
     find_window_client_rect,
     get_virtual_screen_bounds,
+    split_level_id,
 )
 from updater import (
     APP_VERSION,
@@ -3111,10 +3112,13 @@ class GDQuietApp:
         with self.cfg_lock:
             if not self.cfg.get("level_label_enabled", False):
                 return
-        key = profile_key(level_name)
+        with self.cfg_lock:
+            profiles = dict(self.cfg.get("level_profiles") or {})
+        name, level_id = split_level_id(level_name)
+        key = find_matching_profile(profiles, level_name) or level_key(name, level_id)
         if not key or key == self._active_level_key:
             return
-        self._activate_level_profile(level_name, key)
+        self._activate_level_profile(name or f"Level {level_id}", key)
         self.level_detection_status_lbl.configure(
             text=f"Detected from Eclipse label: {self._active_level_name}",
             fg=COLORS["green"],

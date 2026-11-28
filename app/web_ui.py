@@ -26,7 +26,9 @@ from obs_overlay import OverlayServer
 from profiles import (
     apply_level_profile,
     build_level_profile,
+    clean_level_id,
     find_matching_profile,
+    level_key,
     profile_enabled,
     profile_key,
 )
@@ -35,7 +37,9 @@ from screen_reader import (
     ScreenReading,
     ScreenTestSession,
     find_window_client_rect,
+    format_level_label,
     probe_level_label,
+    split_level_id,
 )
 from updater import (
     APP_VERSION,
@@ -1039,7 +1043,11 @@ class GDQuietWebApp:
                 profiles = dict(self.cfg.get("level_profiles") or {})
                 existing = profiles.get(self._active_level_key)
                 enabled = profile_enabled(existing) if isinstance(existing, dict) else True
-                profiles[self._active_level_key] = build_level_profile(self._active_level_name, self.cfg, enabled)
+                if isinstance(existing, dict):
+                    name, level_id = str(existing.get("name") or ""), existing.get("level_id")
+                else:
+                    name, level_id = split_level_id(self._active_level_name)
+                profiles[self._active_level_key] = build_level_profile(name, self.cfg, enabled, level_id)
                 self.cfg["level_profiles"] = profiles
             self._save_cfg()
             self._footer_message = f"Saved profile for {self._active_level_name}."
@@ -1054,7 +1062,9 @@ class GDQuietWebApp:
         self._save_cfg()
         return self.get_state()
 
-    def _activate_level_profile(self, level_name: str, key: str) -> None:
+    def _activate_level_profile(self, level_label: str, key: str) -> None:
+        """Load (or create) the profile for a detected label. `level_label` may be
+        "name" or "name (levelID)"."""
         with self.cfg_lock:
             profiles = dict(self.cfg.get("level_profiles") or {})
             profile = profiles.get(key)
@@ -1062,11 +1072,12 @@ class GDQuietWebApp:
                 # A level switched off on the Levels page is recognised but its settings aren't applied.
                 if profile_enabled(profile):
                     self.cfg.update(apply_level_profile(self.cfg, profile))
-                level_name = str(profile.get("name") or level_name)
             else:
-                profiles[key] = build_level_profile(level_name, self.cfg)
+                name, level_id = split_level_id(level_label)
+                profile = build_level_profile(name or f"Level {level_id}", self.cfg, level_id=level_id)
+                profiles[key] = profile
                 self.cfg["level_profiles"] = profiles
-        self._active_level_name = level_name
+        self._active_level_name = format_level_label(str(profile.get("name") or ""), profile.get("level_id"))
         self._active_level_key = key
         self._save_cfg()
         # A loaded profile can change the selected apps; re-apply if we're mid-mute.
@@ -1085,6 +1096,7 @@ class GDQuietWebApp:
                 {
                     "key": key,
                     "name": str(profile.get("name") or key),
+                    "level_id": str(profile.get("level_id") or ""),
                     "threshold": float(profile.get("mute_at_percent", 50.0)),
                     "enabled": profile_enabled(profile),
                     "app_count": len(profile.get("selected_apps") or []),
@@ -1094,19 +1106,31 @@ class GDQuietWebApp:
         rows.sort(key=lambda r: r["name"].casefold())
         return rows
 
-    def add_level(self, name: str, threshold: Any = None) -> dict[str, Any]:
-        """Add a level by name (or update an existing one), using the current apps and capture settings."""
+    def add_level(self, name: str, threshold: Any = None, level_id: Any = None) -> dict[str, Any]:
+        """Add a level (or update an existing one), using the current apps and capture settings.
+
+        With a level ID the level is stored and matched by ID, so levels that share
+        a name stay separate. "Name (12345)" typed into the name box works too.
+        """
         level_name = re.sub(r"\s+", " ", str(name or "")).strip()[:80]
+        raw_id = str(level_id if level_id is not None else "").strip()
+        if raw_id and not raw_id.isdigit():
+            self._footer_message = "The level ID can only contain numbers."
+            return self.get_state()
+        lid = clean_level_id(raw_id)
+        if lid is None:
+            level_name, parsed = split_level_id(level_name)
+            lid = clean_level_id(parsed)
         if not profile_key(level_name):
             self._footer_message = "Type a level name first."
             return self.get_state()
         with self.cfg_lock:
             profiles = dict(self.cfg.get("level_profiles") or {})
-            key = profile_key(level_name)
+            key = level_key(level_name, lid)
             existing = profiles.get(key)
-            profile = build_level_profile(level_name, self.cfg)
+            profile = build_level_profile(level_name, self.cfg, level_id=lid)
             if isinstance(existing, dict):
-                profile = {**existing, "name": level_name}
+                profile = {**existing, "name": level_name, "level_id": lid}
             if threshold not in (None, ""):
                 try:
                     profile["mute_at_percent"] = round(max(0.0, min(100.0, float(threshold))), 3)
@@ -1115,7 +1139,7 @@ class GDQuietWebApp:
             profiles[key] = profile
             self.cfg["level_profiles"] = profiles
         self._save_cfg()
-        self._footer_message = f"{'Updated' if existing else 'Added'} {level_name}."
+        self._footer_message = f"{'Updated' if existing else 'Added'} {format_level_label(level_name, lid)}."
         return self.get_state()
 
     def set_level_enabled(self, key: str, enabled: bool) -> dict[str, Any]:
@@ -1223,7 +1247,8 @@ class GDQuietWebApp:
         if level_name:
             with self.cfg_lock:
                 profiles = dict(self.cfg.get("level_profiles") or {})
-            key = find_matching_profile(profiles, level_name) or profile_key(level_name)
+            # "name (levelID)" labels match by ID only; name-only labels by name.
+            key = find_matching_profile(profiles, level_name) or level_key(*split_level_id(level_name))
             if key and key != self._active_level_key:
                 self._activate_level_profile(level_name, key)
                 self._footer_message = f"Level detected: {self._active_level_name}"
@@ -1270,10 +1295,15 @@ class GDQuietWebApp:
                 preview = None
         self._level_test = {
             "ok": bool(probe.name),
-            "name": probe.name or "",
+            "name": split_level_id(probe.name or "")[0],
+            "level_id": split_level_id(probe.name or "")[1] or "",
             "raw": probe.raw_text,
             "problem": probe.problem,
-            "matched_name": str(match.get("name") or match_key) if isinstance(match, dict) else "",
+            "matched_name": (
+                format_level_label(str(match.get("name") or match_key), match.get("level_id"))
+                if isinstance(match, dict)
+                else ""
+            ),
             "matched_enabled": profile_enabled(match) if isinstance(match, dict) else None,
             "preview": preview,
             "at": time.time(),
@@ -1855,8 +1885,8 @@ class WebApi:
     def save_setup(self) -> dict[str, Any]:
         return self._app.save_setup()
 
-    def add_level(self, name: str, threshold: Any = None) -> dict[str, Any]:
-        return self._app.add_level(name, threshold)
+    def add_level(self, name: str, threshold: Any = None, level_id: Any = None) -> dict[str, Any]:
+        return self._app.add_level(name, threshold, level_id)
 
     def set_level_enabled(self, key: str, enabled: bool) -> dict[str, Any]:
         return self._app.set_level_enabled(key, enabled)

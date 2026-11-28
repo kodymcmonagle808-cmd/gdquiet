@@ -11,7 +11,7 @@ Standalone Windows app (`GDQuiet.exe`) that reads your level percentage directly
 - **Discord Auto-Deafen:** Record your Discord **Toggle Deafen** hotkey so Discord automatically deafens above your threshold and undeafens on death, exit, or 100%.
 - **Global % Checks Toggle Keybind:** Bind a global Windows keybind on **Overview** to pause or resume `%` watching and audio muting anytime, even while Geometry Dash is focused.
 - **OBS Studio Overlay:** Add a local Browser Source to show live progress, mute state, and threshold, with controls to pause watching or adjust the threshold.
-- **Per-Level Profiles (Beta):** Each level gets its own local threshold, app selection, and capture region. Profiles load automatically when GD Quiet reads the level name from the Eclipse `{levelName}` label. Manage them on the **Levels** tab: add a level by name, set its threshold, or switch it on or off.
+- **Per-Level Profiles (Beta):** Each level gets its own local threshold, app selection, and capture region. Profiles load automatically when GD Quiet reads the Eclipse `{levelName} ({levelID})` label, matching by level ID so levels with the same name stay separate. Manage them on the **Levels** tab: add a level by name, set its threshold, or switch it on or off.
 - **OCR Diagnostics:** Preview the captured region, recognized text, scan time, and consecutive missed reads to help calibrate screen capture.
 - **System Tray Controls:** Pause watching, toggle mute, reopen the window, or exit from the tray; optionally close the window to the tray.
 - **Sign in with Discord:** Optional Discord sign-in through Supabase. The session is stored on this PC, encrypted to your Windows account.
@@ -34,7 +34,7 @@ Standalone Windows app (`GDQuiet.exe`) that reads your level percentage directly
    - *(Optional)* Use the system tray menu to pause/resume, toggle mute, open the window, or exit. Enable **Close to System Tray** in Settings if you want the close button to hide the window instead of exiting.
    - *(Optional, beta)* Per-level profiles from Eclipse:
      1. In Geometry Dash (with Geode and the Eclipse mod menu), press **Tab** to open Eclipse.
-     2. Go to **Labels**, choose **Add new label**, and type `{levelName}`.
+     2. Go to **Labels**, choose **Add new label**, and type `{levelName} ({levelID})`. The ID keeps levels with the same name apart: when it's shown, GD Quiet matches the level by ID only. `{levelName}` on its own also works.
      3. In GD Quiet, turn on **Settings → Per-level profiles from Eclipse label (Beta)**. A **Levels** tab appears in the sidebar.
-     4. Play a level: its name is read from the left 30% of the game window and its profile is created or loaded. On the **Levels** tab you can add levels by name, change each level's threshold, switch levels on or off, and drag a tighter box around the label if needed.
+     4. Play a level: its name is read from the left 30% of the game window and its profile is created or loaded. On the **Levels** tab you can add levels by name and level ID, use **Test detection** to see what's being read, change each level's threshold, switch levels on or off, and drag a tighter box around the label if needed.
    - *(Optional)* Click **Sign in with Discord** in the sidebar to link your Discord account.

@@ -383,7 +383,13 @@
     } else {
       img.hidden = true;
     }
-    $("lvl-test-read").textContent = test.name || "—";
+    $("lvl-test-read").textContent = test.name
+      ? test.level_id
+        ? `${test.name} · ID ${test.level_id}`
+        : `${test.name} · no ID in label (matching by name)`
+      : test.level_id
+      ? `ID ${test.level_id}`
+      : "—";
     $("lvl-test-match-row").hidden = !test.ok;
     $("lvl-test-match").textContent = test.matched_name || "No saved level";
     $("lvl-test-raw").textContent = "Raw OCR: " + (test.raw || "(no text)");
@@ -401,10 +407,11 @@
         const key = escapeHtml(l.key);
         const armed = armedDeleteKey === l.key;
         const apps = l.app_count === 1 ? "1 app" : `${l.app_count} apps`;
+        const idTxt = l.level_id ? `ID ${escapeHtml(l.level_id)} · ` : "No ID · ";
         return `<div class="lvl-row${l.enabled ? "" : " off"}${l.active ? " active" : ""}" data-key="${key}">
           <div class="lvl-main">
             <b title="${escapeHtml(l.name)}">${escapeHtml(l.name)}</b>
-            <span>${l.active ? '<em>Playing now</em> · ' : ""}${apps}</span>
+            <span>${l.active ? '<em>Playing now</em> · ' : ""}${idTxt}${apps}</span>
           </div>
           <div class="val lvl-pct"><input class="inp" data-level-threshold value="${Number(l.threshold)}" aria-label="Threshold for ${escapeHtml(l.name)}" /><span class="unit">%</span></div>
           <button type="button" class="toggle${l.enabled ? " on" : ""}" data-level-toggle aria-label="Use settings for ${escapeHtml(l.name)}"></button>
@@ -938,8 +945,10 @@
         return;
       }
       const pct = $("lvl-add-threshold").value.trim();
-      await mutate((a) => a.add_level(name, pct === "" ? null : pct));
+      const levelId = $("lvl-add-id").value.trim();
+      await mutate((a) => a.add_level(name, pct === "" ? null : pct, levelId === "" ? null : levelId));
       $("lvl-add-name").value = "";
+      $("lvl-add-id").value = "";
       $("lvl-add-threshold").value = "";
       flashSaved();
     });

@@ -16,6 +16,7 @@ from typing import Callable
 
 APP_VERSION = "4.5.1"
 PATCH_NOTES = """\
+- New: level IDs. Use {levelName} ({levelID}) as your Eclipse label so levels with the same name stay separate. When an ID is shown, levels are matched by ID only and the name is ignored. Add the ID when adding a level on the Levels tab
 - Fixed: level names weren't read while muting/% watching was paused. Levels now load whenever the Levels beta is on
 - New: "Test detection" button on the Levels tab shows what the label box sees, what it read, and which of your levels it matches
 - New: the Levels tab shows live scan status (scanning, waiting for Geometry Dash, or game covered)

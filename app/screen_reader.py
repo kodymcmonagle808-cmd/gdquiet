@@ -453,15 +453,47 @@ def _is_plausible_name(line: str) -> bool:
     return letters >= 2 and letters >= len(normalized) * 0.5
 
 
+# "{levelName} ({levelID})": a bracketed number at the end of the line. OCR
+# sometimes reads 0 as O and 1 as l/I/|, and occasionally drops the "(".
+_LEVEL_ID_RE = re.compile(r"^(?P<name>.*?)\s*[\(\[\{]\s*(?P<id>[0-9OoIl|]{1,11})\s*[\)\]\}]?\s*$")
+_LEVEL_ID_NO_OPEN_RE = re.compile(r"^(?P<name>.*?\S)\s+(?P<id>[0-9]{4,11})\s*[\)\]\}]\s*$")
+_ID_DIGIT_FIXES = str.maketrans({"O": "0", "o": "0", "I": "1", "l": "1", "|": "1"})
+
+
+def split_level_id(text: str) -> tuple[str, str | None]:
+    """Split "clubstep startpos (12345678)" into ("clubstep startpos", "12345678").
+
+    Returns (text, None) when there's no level ID.
+    """
+    line = (text or "").strip()
+    match = _LEVEL_ID_RE.match(line) or _LEVEL_ID_NO_OPEN_RE.match(line)
+    if not match:
+        return line, None
+    digits = match.group("id").translate(_ID_DIGIT_FIXES)
+    if not digits.isdigit() or not re.search(r"\d", match.group("id")):
+        return line, None
+    level_id = str(int(digits))  # drop leading zeros so "0123" and "123" match
+    return match.group("name").strip(" \t|•-:"), level_id
+
+
+def format_level_label(name: str, level_id: str | None) -> str:
+    if level_id:
+        return f"{name} ({level_id})" if name else f"({level_id})"
+    return name
+
+
 def pick_level_name(lines: list[OcrLine], align_tolerance: float = 10.0) -> str | None:
-    """Pick the level name from OCR lines of the Eclipse label region.
+    """Pick the level label from OCR lines of the Eclipse label region.
 
     Eclipse stacks its labels with a shared left edge. When stat labels (FPS,
     attempts, CPS, %) are visible, only lines starting at that same left edge
     are considered, which filters out other overlays and in-game text. The
-    first remaining line that isn't a stat is the level name. When the box was
+    first remaining line that isn't a stat is the level label. When the box was
     drawn tightly around just the level-name label, there are no stat lines
     and the first plausible line wins.
+
+    A "{levelName} ({levelID})" label is returned normalised as "name (id)";
+    use split_level_id() to get the parts.
     """
     cleaned = [(OcrLine(_clean_label_line(line.text), line.x, line.y)) for line in lines]
     cleaned = [line for line in cleaned if line.text]
@@ -470,6 +502,14 @@ def pick_level_name(lines: list[OcrLine], align_tolerance: float = 10.0) -> str 
     for line in cleaned:
         if anchor_x is not None and abs(line.x - anchor_x) > align_tolerance:
             continue
+        name, level_id = split_level_id(line.text)
+        if level_id:
+            # Judge only the name part: the ID's digits would otherwise make it look like a stat.
+            if name and (_is_label_stat_line(name) or not _is_plausible_name(name)):
+                continue
+            if not name and len(level_id) < 4:
+                continue  # a lone "(2)" is noise, not a level
+            return format_level_label(name, level_id)
         if not _is_plausible_name(line.text) or _is_label_stat_line(line.text):
             continue
         return line.text
@@ -489,6 +529,19 @@ def prepare_label_image(img: Image.Image) -> tuple[Image.Image, float]:
     sharp = img.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=3))
     big = sharp.resize((img.width * scale, img.height * scale), Image.Resampling.LANCZOS)
     return big, float(scale)
+
+
+def same_level_label(a: str, b: str) -> bool:
+    """Whether two OCR reads are the same level.
+
+    When both reads carry a level ID only the IDs are compared (different levels
+    can share a name). Otherwise names are compared with OCR tolerance.
+    """
+    name_a, id_a = split_level_id(a)
+    name_b, id_b = split_level_id(b)
+    if id_a and id_b:
+        return id_a == id_b
+    return level_name_similarity(name_a, name_b) >= LevelNameTracker.SIMILAR
 
 
 class LevelNameTracker:
@@ -519,7 +572,7 @@ class LevelNameTracker:
         if not self._recent[-1]:
             return None
 
-        cluster = [r for r in self._recent if r and level_name_similarity(r, text) >= self.SIMILAR]
+        cluster = [r for r in self._recent if r and same_level_label(r, text)]
         if len(cluster) < self.NEEDED:
             return None
         counts: dict[str, int] = {}
@@ -527,7 +580,7 @@ class LevelNameTracker:
             counts[r] = counts.get(r, 0) + 1
         # Most common spelling; ties go to the most recent read.
         best = max(reversed(cluster), key=lambda r: counts[r])
-        if self._reported_text and level_name_similarity(best, self._reported_text) >= self.SIMILAR:
+        if self._reported_text and same_level_label(best, self._reported_text):
             return None
         self._reported_text = best
         return best

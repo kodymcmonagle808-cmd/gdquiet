@@ -480,9 +480,10 @@
             <div class="panel-group">
               <div class="panel-title">Your levels</div>
               <div class="panel pad">
-                <p class="cap-note">Each level keeps its own threshold, apps and capture region. When GD Quiet reads a level's name it loads these settings. Switch a level off to keep its name but stop it changing your settings.</p>
+                <p class="cap-note">Each level keeps its own threshold, apps and capture region, and GD Quiet loads them when it reads the level. Add the level ID so levels with the same name stay separate: when an ID is shown, levels are matched by ID only. Switch a level off to stop it changing your settings.</p>
                 <form class="lvl-add" id="lvl-add-form" autocomplete="off">
                   <input class="inp lvl-add-name" id="lvl-add-name" type="text" maxlength="80" placeholder="Level name, e.g. clubstep startpos" aria-label="Level name" />
+                  <input class="inp lvl-add-id" id="lvl-add-id" type="text" inputmode="numeric" maxlength="11" placeholder="Level ID" aria-label="Level ID" />
                   <div class="val lvl-add-pct"><input class="inp" id="lvl-add-threshold" type="text" inputmode="decimal" placeholder="50" aria-label="Threshold percent" /><span class="unit">%</span></div>
                   <button type="submit" class="btn primary sm">Add level</button>
                 </form>
@@ -520,10 +521,10 @@
                   <li>Install the <b>Eclipse</b> mod menu with <b>Geode</b>.</li>
                   <li>In Geometry Dash, press <kbd>Tab</kbd> to open Eclipse.</li>
                   <li>Open <b>Labels</b> and choose <b>Add new label</b>.</li>
-                  <li>Type <code>{levelName}</code> as the label text.</li>
-                  <li>Play a level. The name appears on the left side of the screen and GD Quiet picks it up.</li>
+                  <li>Type <code>{levelName} ({levelID})</code> as the label text.</li>
+                  <li>Play a level. The name and ID appear on the left side of the screen and GD Quiet picks them up.</li>
                 </ol>
-                <div class="foot-note">Keep the label on the left side with Eclipse's other labels. Levels are read even while muting is paused.</div>
+                <div class="foot-note">The ID matters because many levels share a name (like startpos copies). With an ID in the label, GD Quiet matches the ID and ignores the name. <code>{levelName}</code> on its own still works. Levels are read even while muting is paused.</div>
               </div>
             </div>
 
@@ -587,7 +588,7 @@
               <div class="togrow"><span>Enable Discord auto-deafen</span><button type="button" class="toggle" data-bool-key="auto_deafen" aria-label="Enable Discord auto-deafen"></button></div>
               <div class="setrow"><span class="l">Discord hotkey toggle cooldown</span><div class="val"><input class="inp" data-num-key="discord_cooldown_ms" /><span class="unit">ms</span></div><button type="button" class="apply" data-apply-key="discord_cooldown_ms">Apply</button></div>
               <div class="togrow">
-                <div><span>Per-level profiles from Eclipse label <span class="beta-tag">Beta</span></span><span class="sub-desc">Reads the Eclipse {levelName} label to load each level's settings. Adds a Levels tab to the sidebar.</span></div>
+                <div><span>Per-level profiles from Eclipse label <span class="beta-tag">Beta</span></span><span class="sub-desc">Reads the Eclipse {levelName} ({levelID}) label to load each level's settings. Adds a Levels tab to the sidebar.</span></div>
                 <button type="button" class="toggle" data-bool-key="level_label_enabled" aria-label="Read level name from Eclipse label"></button>
               </div>
             </div>
