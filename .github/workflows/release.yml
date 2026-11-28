@@ -7,6 +7,8 @@ on:
 jobs:
   app:
     runs-on: windows-latest
+    # Room for the manual SignPath approval (GitHub caps jobs at 6 hours).
+    timeout-minutes: 300
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -53,6 +55,42 @@ jobs:
         run: |
           $notes = python -c "import sys; sys.path.insert(0, 'app'); from updater import PATCH_NOTES; print(PATCH_NOTES)"
           $notes | Out-File -FilePath dist/patch_notes.txt -Encoding utf8
+
+      # ---- Code signing (SignPath Foundation, free for open source) ----
+      # Runs only once the SIGNPATH_ORGANIZATION_ID repository variable and the
+      # SIGNPATH_API_TOKEN secret are set; until then releases stay unsigned.
+      # Only the downloaded installer is signed: SmartScreen checks downloaded
+      # files, and GDQuiet.exe is unpacked by the installer, not downloaded.
+      # Each signing request waits for a manual approval in SignPath.
+      - name: Upload unsigned installer for signing
+        id: unsigned
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: unsigned-setup
+          path: dist/GDQuiet-Setup.exe
+      - name: Sign installer with SignPath
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'gdquiet' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion-timeout-in-seconds: 14400
+          output-artifact-directory: signed
+      - name: Use signed installer
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        shell: pwsh
+        run: |
+          $signed = Get-ChildItem -Path signed -Recurse -Filter GDQuiet-Setup.exe | Select-Object -First 1
+          if (-not $signed) { throw "SignPath did not return GDQuiet-Setup.exe" }
+          $sig = Get-AuthenticodeSignature $signed.FullName
+          Write-Host "Signature: $($sig.Status) by $($sig.SignerCertificate.Subject)"
+          if ($sig.Status -ne 'Valid') { throw "Signed installer failed verification: $($sig.Status)" }
+          Copy-Item $signed.FullName dist/GDQuiet-Setup.exe -Force
+
       - uses: actions/upload-artifact@v7
         with:
           name: app

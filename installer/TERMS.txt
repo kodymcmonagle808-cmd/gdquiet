@@ -10,7 +10,8 @@ to be bound by all terms below.
 1. LICENSE GRANT (MIT LICENSE)
 --------------------------------------------------------------------------------
 GD Quiet is free, open-source software licensed under the MIT License.
-Copyright (c) GD Quiet contributors.
+Copyright (c) 2026 GD Quiet contributors.
+The full license text is in the LICENSE file in the source repository.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files, to deal in the Software
@@ -37,30 +38,46 @@ distractions while playing Geometry Dash. When active, the Software:
   (d) Optionally sends your configured keyboard shortcut ("Toggle Deafen")
       to Discord when your percentage crosses your chosen threshold, and sends
       it again to undeafen upon death, level exit, or 100% completion.
+  (e) Optionally reads the level name and level ID from a level label you add
+      in the Eclipse mod menu, using the same local OCR, to load your
+      per-level settings.
 
 All screen capture, OCR text recognition, audio session control, and settings
-storage occur 100% locally on your Windows PC.
+storage occur locally on your Windows PC.
 
 
-3. PRIVACY & ZERO-TELEMETRY GUARANTEE
+3. PRIVACY
 --------------------------------------------------------------------------------
-GD Quiet does NOT collect, log, store, transmit, or sell:
-  - Gameplay video, screenshots, or OCR text outside volatile RAM;
+GD Quiet does NOT collect, transmit, or sell:
+  - Gameplay video, screenshots, or OCR text (these never leave your PC);
   - Audio streams, microphone input, or Discord voice/chat data;
-  - Personal identifiers, account tokens, analytics, or crash telemetry.
+  - Analytics, usage tracking, or crash telemetry.
 
-Your preferences are stored solely in your local Windows AppData folder
+Your preferences are stored in your local Windows AppData folder
 (%APPDATA%\GDQuiet\config.json) and can be deleted or reset at any time.
 
+Optional Discord sign-in: if you choose "Sign in with Discord", sign-in happens
+in your web browser through Supabase (the service that hosts GD Quiet's
+accounts). GD Quiet then stores your sign-in session on this PC, encrypted to
+your Windows user account (%APPDATA%\GDQuiet\session.bin). While you are
+signed in, your saved levels (level names, level IDs, thresholds, which apps
+each level mutes, and capture settings) are synced to your account so they can
+be shared between your PCs. Only you can access your synced levels. Your
+Discord username and avatar are shown in the app. Sign out at any time to stop
+syncing and remove the session from this PC.
 
-4. NETWORK ACCESS & AUTOMATIC UPDATE CHECKS
+
+4. NETWORK ACCESS
 --------------------------------------------------------------------------------
-The only outbound network requests made by GD Quiet are optional read-only
-checks against the official GitHub Releases API for this repository to verify
-whether a newer version of GDQuiet-Setup.exe is available. You may disable
-automatic update checks at any time from the in-app Settings tab. When you
-choose to install an update, GD Quiet verifies file size and SHA-256 checksum
-before launching the signed/packaged Setup Wizard.
+GD Quiet makes these network requests:
+  - Update checks against the GitHub Releases API for this project, and
+    downloading GDQuiet-Setup.exe when you choose to install an update. You
+    can turn off automatic update checks in Settings. Before installing an
+    update, GD Quiet verifies the file size and SHA-256 checksum.
+  - Only if you sign in with Discord: sign-in and level sync requests to
+    GD Quiet's Supabase project, and loading your Discord avatar image.
+  - The optional OBS overlay runs a web server on your own PC only
+    (127.0.0.1); it is not reachable from other computers.
 
 
 5. USER RESPONSIBILITY & SYSTEM CONFIGURATION
@@ -105,7 +122,13 @@ included uninstaller, and optionally removing %APPDATA%\GDQuiet.
 9. SOURCE CODE & SUPPORT
 --------------------------------------------------------------------------------
 Official source code, issue tracker, and updates are hosted on the project's
-GitHub repository.
+GitHub repository: https://github.com/kodymcmonagle808-cmd/gdquiet
+
+
+10. CODE SIGNING
+--------------------------------------------------------------------------------
+Free code signing provided by SignPath.io, certificate by SignPath Foundation.
+See CODE_SIGNING_POLICY.md in the source repository for the signing policy.
 
 By clicking "I accept the agreement" below, you confirm that you accept these
 terms and wish to install GD Quiet.

@@ -19,7 +19,7 @@ Standalone Windows app (`GDQuiet.exe`) that reads your level percentage directly
 
 ## Usage
 
-1. Download and run **`GDQuiet-Setup.exe`** from the Releases page to walk through the Setup Wizard (accept terms, choose install folder/shortcuts, then launch GD Quiet). Future stable updates can be installed directly inside the app via **Check for Updates**. Beta updates are currently unavailable, so every install stays on stable releases.
+1. Download and run **`GDQuiet-Setup.exe`** from the Releases page to walk through the Setup Wizard (accept terms, choose install folder/shortcuts, then launch GD Quiet). Future stable updates can be installed directly inside the app via **Check for Updates**. Beta updates are currently unavailable, so every install stays on stable releases. If Windows shows **"Windows protected your PC"**, click **More info**, then **Run anyway**.
 2. In Geometry Dash **Graphics** settings, use **Windowed** or **Borderless** mode and make sure **Show Percentage** is enabled.
 3. In `GDQuiet.exe`:
    - Check the open windows/apps whose audio you want changed.
@@ -38,3 +38,11 @@ Standalone Windows app (`GDQuiet.exe`) that reads your level percentage directly
      3. In GD Quiet, turn on **Settings → Per-level profiles from Eclipse label (Beta)**. A **Levels** tab appears in the sidebar.
      4. Play a level: its name is read from the left 30% of the game window and its profile is created or loaded. When a level you've switched on is detected, watching turns on and that level's % and apps are used; when you move to a level that's switched off (or close the game), watching pauses again. If you turned watching on yourself, it's left alone. Turn on **Auto-add levels** to have new levels added automatically (switched off, with no % until you set one). On the **Levels** tab you can search, add levels by name and level ID, use **Test detection** to see what's being read, change each level's threshold, pick which apps each level mutes (click its app count), switch levels on or off, and drag a tighter box around the label if needed.
    - *(Optional)* Click **Sign in with Discord** in the sidebar to link your Discord account and sync your levels between PCs.
+
+## Code signing
+
+Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/). See the [code signing policy](CODE_SIGNING_POLICY.md) for what is signed, who approves releases, and what network access the app uses.
+
+## License
+
+GD Quiet is open source under the [MIT License](LICENSE).

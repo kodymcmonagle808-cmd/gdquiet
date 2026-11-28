@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration for GD Quiet.
+  Paste this into SignPath (Project > Artifact Configurations) after the
+  project is approved. The release workflow uploads GDQuiet-Setup.exe as a
+  GitHub Actions artifact (a ZIP), and this tells SignPath to Authenticode-sign
+  the installer inside it.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="GDQuiet-Setup.exe">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>
